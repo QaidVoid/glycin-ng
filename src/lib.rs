@@ -31,15 +31,20 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 mod error;
+mod formats;
 mod image;
 mod limits;
+mod loader;
 mod memory;
 pub mod sandbox;
+pub mod sniff;
 
 pub use crate::error::{Error, Result};
 pub use crate::image::{Frame, Image, Orientation, Texture};
 pub use crate::limits::Limits;
+pub use crate::loader::Loader;
 pub use crate::memory::MemoryFormat;
 pub use crate::sandbox::{
     LandlockPosture, RlimitPosture, SandboxPosture, SandboxSelector, SeccompPosture,
 };
+pub use crate::sniff::KnownFormat;
