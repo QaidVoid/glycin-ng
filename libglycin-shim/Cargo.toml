@@ -1,0 +1,38 @@
+[package]
+name = "glycin-ng-libglycin-shim"
+version = "0.1.0"
+edition = "2024"
+description = "libglycin-2.so.0 compat shim that forwards to glycin-ng"
+license = "MIT OR Apache-2.0"
+rust-version = "1.85"
+
+[lib]
+name = "glycin_2"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+libc = "0.2"
+
+[dependencies.glycin-ng]
+path = ".."
+default-features = false
+features = [
+    "decode",
+    "metadata",
+    "landlock",
+    "seccomp",
+    "png",
+    "jpeg",
+    "gif",
+    "webp",
+    "tiff",
+    "bmp",
+    "ico",
+    "tga",
+    "qoi",
+    "exr",
+    "pnm",
+    "dds",
+    "jxl",
+]

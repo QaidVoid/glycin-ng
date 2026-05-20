@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "pixbuf-loader"]
+members = [".", "libglycin-shim", "pixbuf-loader"]
 
 [package]
 name = "glycin-ng"
