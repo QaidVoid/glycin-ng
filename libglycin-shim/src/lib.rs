@@ -17,6 +17,8 @@
 
 mod ffi;
 mod memformat;
+#[cfg(feature = "svg")]
+mod svg;
 mod types;
 
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
@@ -25,12 +27,12 @@ use std::ptr;
 use std::slice;
 use std::sync::OnceLock;
 
-use glycin_ng::{Loader, SandboxSelector};
+use glycin_ng::{Image, Loader, SandboxSelector};
 
 use crate::ffi::{
     GBytes, GError, GFile, GInputStream, GObject, GQuark, GStrv, GType, gboolean, gpointer,
 };
-use crate::types::{FrameRequestState, FrameState, ImageState, LoaderState};
+use crate::types::{FrameRequestState, FrameState, ImageState, LoaderBytes, LoaderState};
 
 const STATE_KEY: &CStr = c"glycin_ng_state";
 
@@ -112,8 +114,9 @@ pub unsafe extern "C" fn gly_loader_new(file: *mut GFile) -> *mut GObject {
     }
     let path_owned = unsafe { CStr::from_ptr(path_ptr) }.to_string_lossy().into_owned();
     unsafe { ffi::g_free(path_ptr as *mut c_void) };
-    let loader = Loader::new_path(PathBuf::from(path_owned));
-    unsafe { attach_state(LoaderState::new(loader)) }
+    let pb = PathBuf::from(path_owned);
+    let loader = Loader::new_path(&pb);
+    unsafe { attach_state(LoaderState::new(loader, LoaderBytes::Path(pb))) }
 }
 
 /// # Safety
@@ -129,8 +132,8 @@ pub unsafe extern "C" fn gly_loader_new_for_bytes(bytes: *mut GBytes) -> *mut GO
         return ptr::null_mut();
     }
     let vec = unsafe { slice::from_raw_parts(data as *const u8, size) }.to_vec();
-    let loader = Loader::new_bytes(vec);
-    unsafe { attach_state(LoaderState::new(loader)) }
+    let loader = Loader::new_bytes(vec.clone());
+    unsafe { attach_state(LoaderState::new(loader, LoaderBytes::Owned(vec))) }
 }
 
 /// # Safety
@@ -164,8 +167,8 @@ pub unsafe extern "C" fn gly_loader_new_for_stream(stream: *mut GInputStream) ->
         }
         buf.extend_from_slice(&chunk[..n as usize]);
     }
-    let loader = Loader::new_bytes(buf);
-    unsafe { attach_state(LoaderState::new(loader)) }
+    let loader = Loader::new_bytes(buf.clone());
+    unsafe { attach_state(LoaderState::new(loader, LoaderBytes::Owned(buf))) }
 }
 
 // ----- gly_loader_set_* -----
@@ -238,6 +241,29 @@ pub unsafe extern "C" fn gly_loader_load(
     let sandbox = *state.sandbox.lock().unwrap();
     let apply = *state.apply_transformations.lock().unwrap();
     let limits = *state.limits.lock().unwrap();
+
+    // SVG fast-path: glycin-ng has no SVG decoder by design (no
+    // permissive renderer exists), so when the shim was built with
+    // `--features svg` we rasterize SVG through resvg directly. The
+    // sniff peeks the source bytes captured at gly_loader_new* time
+    // so this remains zero-cost for non-SVG inputs.
+    #[cfg(feature = "svg")]
+    {
+        match state.bytes.read() {
+            Ok(raw) if svg::looks_like_svg(&raw) => {
+                drop(inner);
+                return match svg::decode(&raw, None) {
+                    Ok(image) => unsafe { attach_state(ImageState::new(image)) },
+                    Err(msg) => {
+                        unsafe { set_error(error, 0, &msg) };
+                        ptr::null_mut()
+                    }
+                };
+            }
+            _ => {}
+        }
+    }
+
     let configured = inner
         .sandbox_selector(sandbox)
         .apply_transformations(apply)
@@ -251,6 +277,9 @@ pub unsafe extern "C" fn gly_loader_load(
         }
     }
 }
+
+#[allow(dead_code)]
+fn _ensure_image_type_in_scope(_: &Image) {}
 
 // ----- gly_image_get_* -----
 

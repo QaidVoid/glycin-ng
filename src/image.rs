@@ -196,9 +196,15 @@ pub struct Image {
     sandbox_posture: SandboxPosture,
 }
 
-#[allow(dead_code)]
 impl Image {
-    pub(crate) fn from_parts(
+    /// Construct an image from already-decoded frames.
+    ///
+    /// Most callers should go through [`Loader::load`](crate::Loader::load)
+    /// which produces an [`Image`] from raw bytes. This constructor
+    /// is for crates that decode a format glycin-ng does not ship a
+    /// decoder for and want to project the result through the same
+    /// `Image` surface.
+    pub fn from_parts(
         format_name: &'static str,
         width: u32,
         height: u32,
@@ -216,15 +222,18 @@ impl Image {
         }
     }
 
-    pub(crate) fn set_orientation(&mut self, orientation: Orientation) {
+    /// Override the reported [`Orientation`].
+    pub fn set_orientation(&mut self, orientation: Orientation) {
         self.orientation = orientation;
     }
 
-    pub(crate) fn set_icc_profile(&mut self, profile: Vec<u8>) {
+    /// Attach an ICC profile blob.
+    pub fn set_icc_profile(&mut self, profile: Vec<u8>) {
         self.icc_profile = Some(profile);
     }
 
-    pub(crate) fn set_exif(&mut self, exif: Vec<u8>) {
+    /// Attach an EXIF blob.
+    pub fn set_exif(&mut self, exif: Vec<u8>) {
         self.exif = Some(exif);
     }
 

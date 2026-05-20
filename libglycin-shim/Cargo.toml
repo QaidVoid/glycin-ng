@@ -11,8 +11,20 @@ name = "glycin_2"
 path = "src/lib.rs"
 crate-type = ["cdylib"]
 
+[features]
+default = []
+# Pulls in `resvg` (MPL-2.0). Builds of the shim that enable this
+# feature produce a binary that combines MIT/Apache-2.0 code with
+# MPL-2.0 code; the resulting library is a "Larger Work" in MPL
+# terms and the resvg-derived files retain their MPL-2.0 license.
+# Distributors who must stay strictly MIT/Apache should leave this
+# off and accept that SVG inputs return an "unsupported format"
+# error.
+svg = ["dep:resvg"]
+
 [dependencies]
 libc = "0.2"
+resvg = { version = "0.45", default-features = false, optional = true }
 
 [dependencies.glycin-ng]
 path = ".."

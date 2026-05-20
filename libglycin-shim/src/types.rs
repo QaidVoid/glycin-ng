@@ -4,19 +4,38 @@ use std::sync::Mutex;
 
 use glycin_ng::{Frame, Image, Limits, Loader, SandboxSelector};
 
+/// Raw bytes captured by `gly_loader_new_*`. We keep a copy alongside
+/// the [`Loader`] so the SVG fast-path can sniff and rasterize
+/// without re-reading the source.
+pub(crate) enum LoaderBytes {
+    Path(std::path::PathBuf),
+    Owned(Vec<u8>),
+}
+
+impl LoaderBytes {
+    pub(crate) fn read(&self) -> std::io::Result<Vec<u8>> {
+        match self {
+            Self::Path(p) => std::fs::read(p),
+            Self::Owned(v) => Ok(v.clone()),
+        }
+    }
+}
+
 /// State backing a `GlyLoader`. The inner [`Loader`] is consumed on
 /// `gly_loader_load`, so it lives behind an `Option` we can `take()`.
 pub(crate) struct LoaderState {
     pub(crate) inner: Mutex<Option<Loader>>,
+    pub(crate) bytes: LoaderBytes,
     pub(crate) apply_transformations: Mutex<bool>,
     pub(crate) sandbox: Mutex<SandboxSelector>,
     pub(crate) limits: Mutex<Limits>,
 }
 
 impl LoaderState {
-    pub(crate) fn new(loader: Loader) -> Self {
+    pub(crate) fn new(loader: Loader, bytes: LoaderBytes) -> Self {
         Self {
             inner: Mutex::new(Some(loader)),
+            bytes,
             apply_transformations: Mutex::new(true),
             sandbox: Mutex::new(SandboxSelector::default()),
             limits: Mutex::new(Limits::default()),
