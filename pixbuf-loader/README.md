@@ -60,11 +60,10 @@ gdk-pixbuf's calling thread) stays unrestricted.
   delays are flattened to the average delay across all frames.
   Per-frame timing requires a custom `GdkPixbufAnimation` subclass
   and is not yet implemented.
-- Output is always RGBA8. Higher bit depths and float formats from
-  EXR/JXL are downsampled. Adding a passthrough for 16-bit and float
-  is straightforward once a caller needs it.
-- 16-bit half-float channels (EXR, partial JXL paths) are currently
-  zeroed; native f16 conversion is on the to-do list.
+- Output is always RGBA8. This is inherent to gdk-pixbuf, which is
+  hardcoded to 8 bits per sample (`gdk_pixbuf_get_bits_per_sample`
+  always returns 8). HDR consumers should target `GdkTexture`
+  directly via a future `glycin-ng-gtk4` adapter.
 
 ## License
 

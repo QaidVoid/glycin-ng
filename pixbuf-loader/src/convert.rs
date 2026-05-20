@@ -84,8 +84,18 @@ fn sample_rgba8(format: MemoryFormat, p: &[u8]) -> (u8, u8, u8, u8) {
             let a = (u16::from_ne_bytes([p[6], p[7]]) >> 8) as u8;
             unpremul_rgb8(r, g, b, a)
         }
-        MemoryFormat::R16g16b16Float | MemoryFormat::R16g16b16a16Float => {
-            (0, 0, 0, 255)
+        MemoryFormat::R16g16b16Float => {
+            let r = half_to_u8(u16::from_ne_bytes([p[0], p[1]]));
+            let g = half_to_u8(u16::from_ne_bytes([p[2], p[3]]));
+            let b = half_to_u8(u16::from_ne_bytes([p[4], p[5]]));
+            (r, g, b, 255)
+        }
+        MemoryFormat::R16g16b16a16Float => {
+            let r = half_to_u8(u16::from_ne_bytes([p[0], p[1]]));
+            let g = half_to_u8(u16::from_ne_bytes([p[2], p[3]]));
+            let b = half_to_u8(u16::from_ne_bytes([p[4], p[5]]));
+            let a = half_to_u8(u16::from_ne_bytes([p[6], p[7]]));
+            (r, g, b, a)
         }
         MemoryFormat::R32g32b32Float => {
             let r = float_to_u8(f32::from_ne_bytes([p[0], p[1], p[2], p[3]]));
@@ -130,6 +140,46 @@ fn unpremul_rgb8(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8, u8) {
 fn float_to_u8(f: f32) -> u8 {
     let clamped = f.clamp(0.0, 1.0);
     (clamped * 255.0 + 0.5) as u8
+}
+
+/// Convert IEEE 754 binary16 bit pattern to an 8-bit channel value
+/// in `[0, 255]`.
+///
+/// Half-precision layout: 1 sign + 5 exponent (bias 15) + 10 mantissa
+/// bits. Denormal numbers and zero map to 0; NaN maps to 0; infinity
+/// saturates to 255 (positive) or 0 (negative). Finite values are
+/// promoted to `f32` and routed through [`float_to_u8`].
+fn half_to_u8(bits: u16) -> u8 {
+    float_to_u8(half_to_f32(bits))
+}
+
+fn half_to_f32(bits: u16) -> f32 {
+    let sign = (bits >> 15) & 1;
+    let exp = (bits >> 10) & 0x1F;
+    let mant = bits & 0x3FF;
+
+    if exp == 0 {
+        if mant == 0 {
+            return if sign == 1 { -0.0 } else { 0.0 };
+        }
+        let f = (mant as f32) / 1024.0 / 16384.0;
+        return if sign == 1 { -f } else { f };
+    }
+    if exp == 31 {
+        if mant == 0 {
+            return if sign == 1 {
+                f32::NEG_INFINITY
+            } else {
+                f32::INFINITY
+            };
+        }
+        return f32::NAN;
+    }
+
+    let f32_exp = (exp as u32 + 112) << 23;
+    let f32_mant = (mant as u32) << 13;
+    let f32_bits = ((sign as u32) << 31) | f32_exp | f32_mant;
+    f32::from_bits(f32_bits)
 }
 
 #[cfg(test)]
@@ -192,6 +242,61 @@ mod tests {
         let t = tex(MemoryFormat::G16, bytes.to_vec(), 1, 1);
         let (out, _) = texture_to_rgba8(&t);
         assert_eq!(out[0], 0xAB);
+    }
+
+    #[test]
+    fn half_to_f32_round_trips_simple_values() {
+        // 0.0
+        assert_eq!(half_to_f32(0x0000), 0.0);
+        // 1.0 -> sign 0, exp 15 (biased), mantissa 0 -> bits 0x3C00
+        assert!((half_to_f32(0x3C00) - 1.0).abs() < 1e-6);
+        // -1.0 -> 0xBC00
+        assert!((half_to_f32(0xBC00) + 1.0).abs() < 1e-6);
+        // 0.5 -> exp 14, mantissa 0 -> 0x3800
+        assert!((half_to_f32(0x3800) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn half_to_u8_scales_to_byte_range() {
+        // 0.0 -> 0
+        assert_eq!(half_to_u8(0x0000), 0);
+        // 1.0 -> 255
+        assert_eq!(half_to_u8(0x3C00), 255);
+        // 0.5 -> 128
+        assert_eq!(half_to_u8(0x3800), 128);
+    }
+
+    #[test]
+    fn half_handles_special_values() {
+        // +inf clamps to 255
+        assert_eq!(half_to_u8(0x7C00), 255);
+        // -inf clamps to 0
+        assert_eq!(half_to_u8(0xFC00), 0);
+        // NaN maps to 0
+        assert_eq!(half_to_u8(0x7E00), 0);
+    }
+
+    #[test]
+    fn rgb16_float_decodes_to_byte() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x3C00_u16.to_ne_bytes()); // 1.0
+        data.extend_from_slice(&0x3800_u16.to_ne_bytes()); // 0.5
+        data.extend_from_slice(&0x0000_u16.to_ne_bytes()); // 0.0
+        let t = tex(MemoryFormat::R16g16b16Float, data, 1, 1);
+        let (out, _) = texture_to_rgba8(&t);
+        assert_eq!(out, vec![255, 128, 0, 255]);
+    }
+
+    #[test]
+    fn rgba16_float_decodes_to_byte() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x3C00_u16.to_ne_bytes()); // 1.0
+        data.extend_from_slice(&0x3800_u16.to_ne_bytes()); // 0.5
+        data.extend_from_slice(&0x0000_u16.to_ne_bytes()); // 0.0
+        data.extend_from_slice(&0x3C00_u16.to_ne_bytes()); // 1.0
+        let t = tex(MemoryFormat::R16g16b16a16Float, data, 1, 1);
+        let (out, _) = texture_to_rgba8(&t);
+        assert_eq!(out, vec![255, 128, 0, 255]);
     }
 
     #[test]
