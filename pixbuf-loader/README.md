@@ -55,8 +55,11 @@ gdk-pixbuf's calling thread) stays unrestricted.
   decoding, so the `prepared` and `updated` callbacks fire only
   once at end-of-stream. Per-row progressive previews would require
   a streaming decoder behind every format.
-- `load_animation` is unimplemented; animated GIF/WebP/APNG return
-  only their first frame.
+- `load_animation` is wired through `GdkPixbufSimpleAnim`, which
+  holds a single frame rate. Animations with non-uniform per-frame
+  delays are flattened to the average delay across all frames.
+  Per-frame timing requires a custom `GdkPixbufAnimation` subclass
+  and is not yet implemented.
 - Output is always RGBA8. Higher bit depths and float formats from
   EXR/JXL are downsampled. Adding a passthrough for 16-bit and float
   is straightforward once a caller needs it.

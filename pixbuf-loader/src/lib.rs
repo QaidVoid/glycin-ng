@@ -53,7 +53,7 @@ pub unsafe extern "C" fn fill_vtable(module: *mut GdkPixbufModule) {
         (*module).begin_load = Some(begin_load);
         (*module).stop_load = Some(stop_load);
         (*module).load_increment = Some(load_increment);
-        (*module).load_animation = None;
+        (*module).load_animation = Some(load_animation);
         (*module).save = None;
         (*module).save_to_callback = None;
         (*module).is_save_option_supported = None;
@@ -439,7 +439,13 @@ unsafe fn image_to_pixbuf(image: &Image, error: *mut *mut GError) -> *mut GdkPix
         unsafe { set_error(error, "image contained no frames") };
         return ptr::null_mut();
     };
-    let texture = frame.texture();
+    unsafe { texture_to_pixbuf(frame.texture(), error) }
+}
+
+unsafe fn texture_to_pixbuf(
+    texture: &glycin_ng::Texture,
+    error: *mut *mut GError,
+) -> *mut GdkPixbuf {
     let width = texture.width() as c_int;
     let height = texture.height() as c_int;
     let (rgba, rowstride) = texture_to_rgba8(texture);
@@ -470,6 +476,88 @@ unsafe fn image_to_pixbuf(image: &Image, error: *mut *mut GError) -> *mut GdkPix
         unsafe { set_error(error, "gdk_pixbuf_new_from_bytes returned NULL") };
     }
     pixbuf
+}
+
+/// `GdkPixbufModuleLoadAnimationFunc`: decode every frame and return
+/// a `GdkPixbufSimpleAnim`.
+///
+/// `GdkPixbufSimpleAnim` holds a single frame rate, so animations
+/// with non-uniform per-frame delays are flattened to the average
+/// delay across all frames. Per-frame timing requires a custom
+/// `GdkPixbufAnimation` subclass and is not yet implemented.
+unsafe extern "C" fn load_animation(
+    file: *mut libc::FILE,
+    error: *mut *mut GError,
+) -> *mut c_void {
+    let bytes = match unsafe { read_file_to_vec(file) } {
+        Ok(b) => b,
+        Err(msg) => {
+            unsafe { set_error(error, &msg) };
+            return ptr::null_mut();
+        }
+    };
+
+    let image = match Loader::new_bytes(bytes).load() {
+        Ok(img) => img,
+        Err(e) => {
+            unsafe { set_error(error, &e.to_string()) };
+            return ptr::null_mut();
+        }
+    };
+
+    let frames = image.frames();
+    if frames.is_empty() {
+        unsafe { set_error(error, "image contained no frames") };
+        return ptr::null_mut();
+    }
+
+    let first = &frames[0];
+    let width = first.texture().width() as c_int;
+    let height = first.texture().height() as c_int;
+    let rate = average_rate_fps(frames);
+
+    let anim =
+        unsafe { crate::ffi::gdk_pixbuf_simple_anim_new(width, height, rate) };
+    if anim.is_null() {
+        unsafe { set_error(error, "gdk_pixbuf_simple_anim_new returned NULL") };
+        return ptr::null_mut();
+    }
+    unsafe { crate::ffi::gdk_pixbuf_simple_anim_set_loop(anim, 1) };
+
+    let mut added = 0_usize;
+    for frame in frames {
+        let pixbuf = unsafe { texture_to_pixbuf(frame.texture(), ptr::null_mut()) };
+        if pixbuf.is_null() {
+            continue;
+        }
+        unsafe { crate::ffi::gdk_pixbuf_simple_anim_add_frame(anim, pixbuf) };
+        unsafe { crate::ffi::g_object_unref(pixbuf as *mut c_void) };
+        added += 1;
+    }
+
+    if added == 0 {
+        unsafe { crate::ffi::g_object_unref(anim as *mut c_void) };
+        unsafe { set_error(error, "no frames could be converted to pixbuf") };
+        return ptr::null_mut();
+    }
+
+    anim as *mut c_void
+}
+
+fn average_rate_fps(frames: &[glycin_ng::Frame]) -> f32 {
+    let mut total_ms: u64 = 0;
+    let mut counted: u64 = 0;
+    for f in frames {
+        if let Some(d) = f.delay() {
+            total_ms = total_ms.saturating_add(d.as_millis() as u64);
+            counted += 1;
+        }
+    }
+    if counted == 0 {
+        return 10.0;
+    }
+    let avg_ms = (total_ms / counted).max(1);
+    (1000.0 / avg_ms as f32).clamp(0.1, 120.0)
 }
 
 unsafe fn set_error(error: *mut *mut GError, msg: &str) {
@@ -589,7 +677,7 @@ mod incremental_tests {
         assert!(module.begin_load.is_some());
         assert!(module.load_increment.is_some());
         assert!(module.stop_load.is_some());
-        assert!(module.load_animation.is_none());
+        assert!(module.load_animation.is_some());
         assert!(module.save.is_none());
     }
 
@@ -613,6 +701,59 @@ mod incremental_tests {
         _: c_int,
         _: *mut c_void,
     ) {
+    }
+
+    #[test]
+    fn average_rate_handles_uniform_frames() {
+        use glycin_ng::{Frame, MemoryFormat, Texture};
+        use std::time::Duration;
+        let tex = Texture::from_parts(
+            1,
+            1,
+            4,
+            MemoryFormat::R8g8b8a8,
+            vec![0u8; 4].into_boxed_slice(),
+        )
+        .unwrap();
+        let frames = vec![
+            Frame::new(tex.clone(), Some(Duration::from_millis(100))),
+            Frame::new(tex.clone(), Some(Duration::from_millis(100))),
+            Frame::new(tex, Some(Duration::from_millis(100))),
+        ];
+        assert!((average_rate_fps(&frames) - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn average_rate_falls_back_when_no_delays() {
+        use glycin_ng::{Frame, MemoryFormat, Texture};
+        let tex = Texture::from_parts(
+            1,
+            1,
+            4,
+            MemoryFormat::R8g8b8a8,
+            vec![0u8; 4].into_boxed_slice(),
+        )
+        .unwrap();
+        let frames = vec![Frame::new(tex, None)];
+        assert!((average_rate_fps(&frames) - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn average_rate_clamps_extreme_delays() {
+        use glycin_ng::{Frame, MemoryFormat, Texture};
+        use std::time::Duration;
+        let tex = Texture::from_parts(
+            1,
+            1,
+            4,
+            MemoryFormat::R8g8b8a8,
+            vec![0u8; 4].into_boxed_slice(),
+        )
+        .unwrap();
+        let too_fast = vec![Frame::new(tex.clone(), Some(Duration::from_micros(100)))];
+        let too_slow = vec![Frame::new(tex, Some(Duration::from_secs(3600)))];
+        assert!(average_rate_fps(&too_fast) <= 120.0);
+        assert!(average_rate_fps(&too_slow) >= 0.1);
     }
 
     #[test]

@@ -15,6 +15,11 @@ pub struct GdkPixbuf {
 }
 
 #[repr(C)]
+pub struct GdkPixbufSimpleAnim {
+    _private: [u8; 0],
+}
+
+#[repr(C)]
 pub struct GBytes {
     _private: [u8; 0],
 }
@@ -144,6 +149,20 @@ unsafe extern "C" {
     pub fn gdk_pixbuf_get_width(pixbuf: *mut GdkPixbuf) -> c_int;
     pub fn gdk_pixbuf_get_height(pixbuf: *mut GdkPixbuf) -> c_int;
 
+    pub fn gdk_pixbuf_simple_anim_new(
+        width: c_int,
+        height: c_int,
+        rate: f32,
+    ) -> *mut GdkPixbufSimpleAnim;
+    pub fn gdk_pixbuf_simple_anim_add_frame(
+        animation: *mut GdkPixbufSimpleAnim,
+        pixbuf: *mut GdkPixbuf,
+    );
+    pub fn gdk_pixbuf_simple_anim_set_loop(
+        animation: *mut GdkPixbufSimpleAnim,
+        loop_: c_int,
+    );
+
     pub fn g_bytes_new(data: *const c_void, size: usize) -> *mut GBytes;
     pub fn g_bytes_unref(bytes: *mut GBytes);
 
@@ -167,8 +186,34 @@ pub use test_stubs::*;
 
 #[cfg(test)]
 mod test_stubs {
-    use super::{GBytes, GError, GdkPixbuf};
+    use super::{GBytes, GError, GdkPixbuf, GdkPixbufSimpleAnim};
     use std::ffi::{c_char, c_int, c_void};
+
+    /// # Safety
+    /// Stub; returns NULL.
+    pub unsafe extern "C" fn gdk_pixbuf_simple_anim_new(
+        _: c_int,
+        _: c_int,
+        _: f32,
+    ) -> *mut GdkPixbufSimpleAnim {
+        std::ptr::null_mut()
+    }
+
+    /// # Safety
+    /// Stub; no-op.
+    pub unsafe extern "C" fn gdk_pixbuf_simple_anim_add_frame(
+        _: *mut GdkPixbufSimpleAnim,
+        _: *mut GdkPixbuf,
+    ) {
+    }
+
+    /// # Safety
+    /// Stub; no-op.
+    pub unsafe extern "C" fn gdk_pixbuf_simple_anim_set_loop(
+        _: *mut GdkPixbufSimpleAnim,
+        _: c_int,
+    ) {
+    }
 
     /// # Safety
     /// Pixbuf creation is stubbed; always returns NULL in tests.
