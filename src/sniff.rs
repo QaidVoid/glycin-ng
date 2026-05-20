@@ -120,9 +120,7 @@ pub fn detect(buf: &[u8]) -> Option<KnownFormat> {
     if starts_with(buf, b"DDS ") {
         return Some(KnownFormat::Dds);
     }
-    if starts_with(buf, b"\xff\x0a")
-        || starts_with(buf, b"\0\0\0\x0cJXL \r\n\x87\n")
-    {
+    if starts_with(buf, b"\xff\x0a") || starts_with(buf, b"\0\0\0\x0cJXL \r\n\x87\n") {
         return Some(KnownFormat::Jxl);
     }
     if looks_like_svg(buf) {
@@ -162,9 +160,7 @@ fn find_svg_open_tag(haystack: &[u8]) -> bool {
         return false;
     }
     for i in 0..=haystack.len() - needle.len() {
-        if &haystack[i..i + needle.len()] == needle
-            && starts_with_svg_open_tag(&haystack[i..])
-        {
+        if &haystack[i..i + needle.len()] == needle && starts_with_svg_open_tag(&haystack[i..]) {
             return true;
         }
     }
@@ -246,7 +242,9 @@ mod tests {
 
     #[test]
     fn detects_pnm_family() {
-        for kind in [b"P1\n", b"P2\n", b"P3\n", b"P4\n", b"P5\n", b"P6\n", b"P7\n"] {
+        for kind in [
+            b"P1\n", b"P2\n", b"P3\n", b"P4\n", b"P5\n", b"P6\n", b"P7\n",
+        ] {
             assert_eq!(detect(kind), Some(KnownFormat::Pnm));
         }
         assert_eq!(detect(b"P1 "), Some(KnownFormat::Pnm));

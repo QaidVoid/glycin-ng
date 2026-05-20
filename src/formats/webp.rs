@@ -87,9 +87,7 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
 fn map_err(e: image_webp::DecodingError) -> Error {
     match e {
         image_webp::DecodingError::IoError(io) => Error::Io(io),
-        image_webp::DecodingError::MemoryLimitExceeded => {
-            Error::LimitExceeded("webp memory limit")
-        }
+        image_webp::DecodingError::MemoryLimitExceeded => Error::LimitExceeded("webp memory limit"),
         other => Error::Malformed(other.to_string()),
     }
 }

@@ -20,6 +20,9 @@ mod tests {
             apply_transformations: true,
         };
         let err = decode(b"\x76\x2f\x31\x01garbage", &opts).unwrap_err();
-        assert!(matches!(err, crate::Error::Malformed(_) | crate::Error::Io(_)));
+        assert!(matches!(
+            err,
+            crate::Error::Malformed(_) | crate::Error::Io(_)
+        ));
     }
 }

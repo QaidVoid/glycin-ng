@@ -20,6 +20,9 @@ mod tests {
             apply_transformations: true,
         };
         let err = decode(b"BMxx", &opts).unwrap_err();
-        assert!(err.to_string().to_lowercase().contains("malformed") || matches!(err, crate::Error::Io(_)));
+        assert!(
+            err.to_string().to_lowercase().contains("malformed")
+                || matches!(err, crate::Error::Io(_))
+        );
     }
 }

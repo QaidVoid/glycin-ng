@@ -10,8 +10,9 @@ use crate::{Error, Frame, Image, MemoryFormat, Result, Texture};
 use super::DecodeOptions;
 
 pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
-    let jxl =
-        JxlImage::builder().read(Cursor::new(bytes)).map_err(|e| Error::Decoder {
+    let jxl = JxlImage::builder()
+        .read(Cursor::new(bytes))
+        .map_err(|e| Error::Decoder {
             format: "jxl",
             message: e.to_string(),
         })?;
@@ -34,11 +35,12 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     };
     let _ = channels;
 
-    let pixel_count = (width as u64).checked_mul(height as u64).ok_or(
-        Error::LimitExceeded("max_pixels"),
-    )? as usize;
-    let total_floats =
-        pixel_count.checked_mul(4).ok_or(Error::LimitExceeded("buffer size"))?;
+    let pixel_count = (width as u64)
+        .checked_mul(height as u64)
+        .ok_or(Error::LimitExceeded("max_pixels"))? as usize;
+    let total_floats = pixel_count
+        .checked_mul(4)
+        .ok_or(Error::LimitExceeded("buffer size"))?;
 
     let mut frames = Vec::with_capacity(num_keyframes as usize);
     let mut total_animation = Duration::ZERO;
@@ -59,26 +61,27 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
             .filter(|s| *s <= u32::MAX as u64)
             .ok_or(Error::LimitExceeded("stride"))? as u32;
 
-        let texture = Texture::from_parts(
-            width,
-            height,
-            stride,
-            format,
-            bytes_vec.into_boxed_slice(),
-        )
-        .ok_or_else(|| Error::Decoder {
-            format: "jxl",
-            message: "texture construction failed".into(),
-        })?;
+        let texture =
+            Texture::from_parts(width, height, stride, format, bytes_vec.into_boxed_slice())
+                .ok_or_else(|| Error::Decoder {
+                    format: "jxl",
+                    message: "texture construction failed".into(),
+                })?;
 
         let delay = if num_keyframes > 1 {
             let header = jxl.frame_header(idx);
             let duration_ticks = header.map(|h| h.duration as u64).unwrap_or(0);
-            let tps = jxl.image_header().metadata.animation.as_ref().map(|a| {
-                let num = a.tps_numerator.max(1) as u64;
-                let denom = a.tps_denominator.max(1) as u64;
-                (num, denom)
-            }).unwrap_or((1, 1));
+            let tps = jxl
+                .image_header()
+                .metadata
+                .animation
+                .as_ref()
+                .map(|a| {
+                    let num = a.tps_numerator.max(1) as u64;
+                    let denom = a.tps_denominator.max(1) as u64;
+                    (num, denom)
+                })
+                .unwrap_or((1, 1));
             let micros = duration_ticks
                 .saturating_mul(1_000_000)
                 .saturating_mul(tps.1)
@@ -125,6 +128,9 @@ mod tests {
             apply_transformations: true,
         };
         let err = decode(b"not a jxl", &opts).unwrap_err();
-        assert!(matches!(err, Error::Decoder { .. } | Error::Malformed(_) | Error::Io(_)));
+        assert!(matches!(
+            err,
+            Error::Decoder { .. } | Error::Malformed(_) | Error::Io(_)
+        ));
     }
 }

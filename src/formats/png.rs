@@ -44,12 +44,10 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
 
     let mut frames = Vec::with_capacity(frame_count as usize);
     for _ in 0..frame_count {
-        let buffer_size = reader
-            .output_buffer_size()
-            .ok_or_else(|| Error::Decoder {
-                format: "png",
-                message: "decoder reported no buffer size".into(),
-            })?;
+        let buffer_size = reader.output_buffer_size().ok_or_else(|| Error::Decoder {
+            format: "png",
+            message: "decoder reported no buffer size".into(),
+        })?;
         let mut buf = vec![0u8; buffer_size];
         let output_info = reader.next_frame(&mut buf).map_err(map_err)?;
 

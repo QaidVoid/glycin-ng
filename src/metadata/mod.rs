@@ -20,7 +20,9 @@ use crate::{Image, Orientation};
 /// left untouched.
 pub(crate) fn apply_orientation_if_present(image: &mut Image, apply: bool) {
     let Some(blob) = image.exif() else { return };
-    let Some(raw) = exif::parse_orientation(blob) else { return };
+    let Some(raw) = exif::parse_orientation(blob) else {
+        return;
+    };
     let orientation = Orientation::from_exif(raw);
     if orientation == Orientation::Normal {
         return;

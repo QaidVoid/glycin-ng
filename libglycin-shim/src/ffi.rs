@@ -109,10 +109,7 @@ mod test_stubs {
         _: super::GDestroyNotify,
     ) {
     }
-    pub unsafe extern "C" fn g_object_get_data(
-        _: *mut GObject,
-        _: *const c_char,
-    ) -> gpointer {
+    pub unsafe extern "C" fn g_object_get_data(_: *mut GObject, _: *const c_char) -> gpointer {
         std::ptr::null_mut()
     }
     pub unsafe extern "C" fn g_object_unref(_: *mut c_void) {}

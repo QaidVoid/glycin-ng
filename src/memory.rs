@@ -63,10 +63,7 @@ impl MemoryFormat {
     pub const fn channels(self) -> u8 {
         match self {
             Self::G8 | Self::G16 => 1,
-            Self::G8a8
-            | Self::G8a8Premultiplied
-            | Self::G16a16
-            | Self::G16a16Premultiplied => 2,
+            Self::G8a8 | Self::G8a8Premultiplied | Self::G16a16 | Self::G16a16Premultiplied => 2,
             Self::R8g8b8
             | Self::B8g8r8
             | Self::R16g16b16
@@ -103,9 +100,7 @@ impl MemoryFormat {
             | Self::G16a16
             | Self::G16a16Premultiplied => 4,
             Self::R16g16b16 | Self::R16g16b16Float => 6,
-            Self::R16g16b16a16
-            | Self::R16g16b16a16Premultiplied
-            | Self::R16g16b16a16Float => 8,
+            Self::R16g16b16a16 | Self::R16g16b16a16Premultiplied | Self::R16g16b16a16Float => 8,
             Self::R32g32b32Float => 12,
             Self::R32g32b32a32Float | Self::R32g32b32a32FloatPremultiplied => 16,
         }

@@ -10,7 +10,11 @@ use super::DecodeOptions;
 pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     let mut options = gif::DecodeOptions::new();
     options.set_color_output(gif::ColorOutput::RGBA);
-    let mem_bytes = opts.limits.decode_memory_mib.saturating_mul(1024 * 1024).max(1);
+    let mem_bytes = opts
+        .limits
+        .decode_memory_mib
+        .saturating_mul(1024 * 1024)
+        .max(1);
     let nonzero = std::num::NonZeroU64::new(mem_bytes)
         .unwrap_or_else(|| std::num::NonZeroU64::new(1).unwrap());
     options.set_memory_limit(gif::MemoryLimit::Bytes(nonzero));
@@ -41,9 +45,7 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
         }
 
         let buffer = frame.buffer.to_vec();
-        let stride = fw
-            .checked_mul(4)
-            .ok_or(Error::LimitExceeded("stride"))?;
+        let stride = fw.checked_mul(4).ok_or(Error::LimitExceeded("stride"))?;
         let texture = Texture::from_parts(
             fw,
             fh,

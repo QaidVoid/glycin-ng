@@ -53,12 +53,8 @@ fn into_native(dynamic: DynamicImage) -> (MemoryFormat, Vec<u8>) {
         DynamicImage::ImageRgb8(b) => (MemoryFormat::R8g8b8, b.into_raw()),
         DynamicImage::ImageRgba8(b) => (MemoryFormat::R8g8b8a8, b.into_raw()),
         DynamicImage::ImageLuma16(b) => (MemoryFormat::G16, u16_buf_to_bytes(b.into_raw())),
-        DynamicImage::ImageLumaA16(b) => {
-            (MemoryFormat::G16a16, u16_buf_to_bytes(b.into_raw()))
-        }
-        DynamicImage::ImageRgb16(b) => {
-            (MemoryFormat::R16g16b16, u16_buf_to_bytes(b.into_raw()))
-        }
+        DynamicImage::ImageLumaA16(b) => (MemoryFormat::G16a16, u16_buf_to_bytes(b.into_raw())),
+        DynamicImage::ImageRgb16(b) => (MemoryFormat::R16g16b16, u16_buf_to_bytes(b.into_raw())),
         DynamicImage::ImageRgba16(b) => {
             (MemoryFormat::R16g16b16a16, u16_buf_to_bytes(b.into_raw()))
         }

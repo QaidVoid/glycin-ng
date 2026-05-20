@@ -22,9 +22,7 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     let transform = Transform::identity();
     resvg::render(&tree, transform, &mut pixmap.as_mut());
 
-    let stride = width
-        .checked_mul(4)
-        .ok_or(Error::LimitExceeded("stride"))?;
+    let stride = width.checked_mul(4).ok_or(Error::LimitExceeded("stride"))?;
     let texture = Texture::from_parts(
         width,
         height,
@@ -66,7 +64,10 @@ mod tests {
         assert_eq!(image.width(), 4);
         assert_eq!(image.height(), 4);
         let frame = image.first_frame().unwrap();
-        assert_eq!(frame.texture().format(), MemoryFormat::R8g8b8a8Premultiplied);
+        assert_eq!(
+            frame.texture().format(),
+            MemoryFormat::R8g8b8a8Premultiplied
+        );
         assert_eq!(frame.texture().data().len(), 4 * 4 * 4);
         // First pixel should be red (255, 0, 0, 255) premultiplied -> (255, 0, 0, 255).
         let data = frame.texture().data();

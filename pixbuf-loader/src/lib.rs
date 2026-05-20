@@ -28,8 +28,8 @@ use glycin_ng::{Image, Loader};
 use crate::convert::texture_to_rgba8;
 use crate::ffi::{
     GDK_COLORSPACE_RGB, GDK_PIXBUF_FORMAT_THREADSAFE, GError, GdkPixbuf, GdkPixbufFormat,
-    GdkPixbufModule, GdkPixbufModulePattern, GdkPixbufModulePreparedFunc,
-    GdkPixbufModuleSizeFunc, GdkPixbufModuleUpdatedFunc,
+    GdkPixbufModule, GdkPixbufModulePattern, GdkPixbufModulePreparedFunc, GdkPixbufModuleSizeFunc,
+    GdkPixbufModuleUpdatedFunc,
 };
 
 /// Populate the supplied module's vtable with our entry points.
@@ -77,8 +77,7 @@ pub unsafe extern "C" fn fill_info(info: *mut GdkPixbufFormat) {
     let signatures = signatures();
     unsafe {
         (*info).name = c"glycin_ng".as_ptr();
-        (*info).signature =
-            signatures.as_ptr() as *mut GdkPixbufModulePattern;
+        (*info).signature = signatures.as_ptr() as *mut GdkPixbufModulePattern;
         (*info).domain = c"glycin_ng".as_ptr();
         (*info).description = c"glycin-ng image loader".as_ptr();
         (*info).mime_types = mime_types().as_ptr() as *mut *const c_char;
@@ -246,8 +245,7 @@ fn mime_types() -> &'static [*const c_char] {
             b"image/vnd-ms.dds\0",
             b"image/jxl\0",
         ];
-        let mut v: Vec<*const c_char> =
-            NAMES.iter().map(|n| n.as_ptr() as *const c_char).collect();
+        let mut v: Vec<*const c_char> = NAMES.iter().map(|n| n.as_ptr() as *const c_char).collect();
         v.push(ptr::null());
         PointerList(v)
     });
@@ -258,33 +256,11 @@ fn extensions() -> &'static [*const c_char] {
     static CELL: OnceLock<PointerList> = OnceLock::new();
     let inner = CELL.get_or_init(|| {
         const EXTS: &[&[u8]] = &[
-            b"png\0",
-            b"apng\0",
-            b"jpg\0",
-            b"jpeg\0",
-            b"jpe\0",
-            b"jfif\0",
-            b"gif\0",
-            b"webp\0",
-            b"tif\0",
-            b"tiff\0",
-            b"bmp\0",
-            b"dib\0",
-            b"ico\0",
-            b"cur\0",
-            b"tga\0",
-            b"qoi\0",
-            b"exr\0",
-            b"pbm\0",
-            b"pgm\0",
-            b"ppm\0",
-            b"pnm\0",
-            b"pam\0",
-            b"dds\0",
-            b"jxl\0",
+            b"png\0", b"apng\0", b"jpg\0", b"jpeg\0", b"jpe\0", b"jfif\0", b"gif\0", b"webp\0",
+            b"tif\0", b"tiff\0", b"bmp\0", b"dib\0", b"ico\0", b"cur\0", b"tga\0", b"qoi\0",
+            b"exr\0", b"pbm\0", b"pgm\0", b"ppm\0", b"pnm\0", b"pam\0", b"dds\0", b"jxl\0",
         ];
-        let mut v: Vec<*const c_char> =
-            EXTS.iter().map(|e| e.as_ptr() as *const c_char).collect();
+        let mut v: Vec<*const c_char> = EXTS.iter().map(|e| e.as_ptr() as *const c_char).collect();
         v.push(ptr::null());
         PointerList(v)
     });
@@ -343,10 +319,7 @@ unsafe extern "C" fn load_increment(
     1
 }
 
-unsafe extern "C" fn stop_load(
-    context: *mut c_void,
-    error: *mut *mut GError,
-) -> c_int {
+unsafe extern "C" fn stop_load(context: *mut c_void, error: *mut *mut GError) -> c_int {
     if context.is_null() {
         unsafe { set_error(error, "stop_load called with null context") };
         return 0;
@@ -402,10 +375,7 @@ unsafe extern "C" fn stop_load(
 /// `GdkPixbufModuleLoadFunc`: read the entire image from a `FILE*`
 /// stream, decode through glycin-ng, and hand back a freshly
 /// allocated `GdkPixbuf`.
-unsafe extern "C" fn load(
-    file: *mut libc::FILE,
-    error: *mut *mut GError,
-) -> *mut GdkPixbuf {
+unsafe extern "C" fn load(file: *mut libc::FILE, error: *mut *mut GError) -> *mut GdkPixbuf {
     let bytes = match unsafe { read_file_to_vec(file) } {
         Ok(b) => b,
         Err(msg) => {
@@ -432,14 +402,7 @@ unsafe fn read_file_to_vec(file: *mut libc::FILE) -> Result<Vec<u8>, String> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 65536];
     loop {
-        let n = unsafe {
-            libc::fread(
-                chunk.as_mut_ptr() as *mut c_void,
-                1,
-                chunk.len(),
-                file,
-            )
-        };
+        let n = unsafe { libc::fread(chunk.as_mut_ptr() as *mut c_void, 1, chunk.len(), file) };
         if n == 0 {
             if unsafe { libc::ferror(file) } != 0 {
                 return Err("fread reported an error".into());
@@ -470,9 +433,7 @@ unsafe fn texture_to_pixbuf(
     let height = texture.height() as c_int;
     let (rgba, rowstride) = texture_to_rgba8(texture);
 
-    let gbytes = unsafe {
-        crate::ffi::g_bytes_new(rgba.as_ptr() as *const c_void, rgba.len())
-    };
+    let gbytes = unsafe { crate::ffi::g_bytes_new(rgba.as_ptr() as *const c_void, rgba.len()) };
     if gbytes.is_null() {
         unsafe { set_error(error, "g_bytes_new returned NULL") };
         return ptr::null_mut();
@@ -505,10 +466,7 @@ unsafe fn texture_to_pixbuf(
 /// with non-uniform per-frame delays are flattened to the average
 /// delay across all frames. Per-frame timing requires a custom
 /// `GdkPixbufAnimation` subclass and is not yet implemented.
-unsafe extern "C" fn load_animation(
-    file: *mut libc::FILE,
-    error: *mut *mut GError,
-) -> *mut c_void {
+unsafe extern "C" fn load_animation(file: *mut libc::FILE, error: *mut *mut GError) -> *mut c_void {
     let bytes = match unsafe { read_file_to_vec(file) } {
         Ok(b) => b,
         Err(msg) => {
@@ -536,8 +494,7 @@ unsafe extern "C" fn load_animation(
     let height = first.texture().height() as c_int;
     let rate = average_rate_fps(frames);
 
-    let anim =
-        unsafe { crate::ffi::gdk_pixbuf_simple_anim_new(width, height, rate) };
+    let anim = unsafe { crate::ffi::gdk_pixbuf_simple_anim_new(width, height, rate) };
     if anim.is_null() {
         unsafe { set_error(error, "gdk_pixbuf_simple_anim_new returned NULL") };
         return ptr::null_mut();
@@ -588,9 +545,7 @@ unsafe fn set_error(error: *mut *mut GError, msg: &str) {
         Ok(c) => c,
         Err(_) => CString::new("error").unwrap(),
     };
-    let domain = unsafe {
-        crate::ffi::g_quark_from_static_string(c"glycin_ng".as_ptr())
-    };
+    let domain = unsafe { crate::ffi::g_quark_from_static_string(c"glycin_ng".as_ptr()) };
     unsafe {
         crate::ffi::g_set_error_literal(error, domain, 0, cmsg.as_ptr());
     }
@@ -649,8 +604,7 @@ mod incremental_tests {
     #[test]
     fn load_increment_ignores_zero_size_and_null_buf() {
         let ctx = unsafe { begin_load(None, None, None, ptr::null_mut(), ptr::null_mut()) };
-        let rc_zero =
-            unsafe { load_increment(ctx, b"x".as_ptr(), 0, ptr::null_mut()) };
+        let rc_zero = unsafe { load_increment(ctx, b"x".as_ptr(), 0, ptr::null_mut()) };
         let rc_null = unsafe { load_increment(ctx, ptr::null(), 4, ptr::null_mut()) };
         assert_eq!(rc_zero, 1);
         assert_eq!(rc_null, 1);
@@ -660,14 +614,7 @@ mod incremental_tests {
 
     #[test]
     fn load_increment_rejects_null_context() {
-        let rc = unsafe {
-            load_increment(
-                ptr::null_mut(),
-                b"x".as_ptr(),
-                1,
-                ptr::null_mut(),
-            )
-        };
+        let rc = unsafe { load_increment(ptr::null_mut(), b"x".as_ptr(), 1, ptr::null_mut()) };
         assert_eq!(rc, 0);
     }
 
@@ -707,12 +654,7 @@ mod incremental_tests {
     }
 
     extern "C" fn never_called_size(_: *mut c_int, _: *mut c_int, _: *mut c_void) {}
-    extern "C" fn never_called_prepared(
-        _: *mut GdkPixbuf,
-        _: *mut c_void,
-        _: *mut c_void,
-    ) {
-    }
+    extern "C" fn never_called_prepared(_: *mut GdkPixbuf, _: *mut c_void, _: *mut c_void) {}
     extern "C" fn never_called_updated(
         _: *mut GdkPixbuf,
         _: c_int,
@@ -794,4 +736,3 @@ mod incremental_tests {
         assert_eq!(restored.user_data as usize, 0xdead_beef);
     }
 }
-

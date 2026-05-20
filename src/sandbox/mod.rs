@@ -345,15 +345,19 @@ mod tests {
             rlimit: false,
             strict: false,
         };
-        let (blocked, posture) = run_in_worker(selector, Limits::default(), || {
-            match std::fs::read("/etc/hostname") {
-                Ok(_) => Ok(false),
-                Err(_) => Ok(true),
-            }
-        })
-        .unwrap();
+        let (blocked, posture) =
+            run_in_worker(selector, Limits::default(), || {
+                match std::fs::read("/etc/hostname") {
+                    Ok(_) => Ok(false),
+                    Err(_) => Ok(true),
+                }
+            })
+            .unwrap();
         if matches!(posture.landlock, LandlockPosture::Enforced { .. }) {
-            assert!(blocked, "landlock was enforced but /etc/hostname was readable");
+            assert!(
+                blocked,
+                "landlock was enforced but /etc/hostname was readable"
+            );
         }
     }
 
@@ -370,8 +374,7 @@ mod tests {
             // SYS_getpriority is not in the allowlist; expect -1 with
             // errno EPERM.
             // SAFETY: only invokes a single syscall through libc.
-            let rc =
-                unsafe { libc::syscall(libc::SYS_getpriority, libc::PRIO_PROCESS, 0_i32) };
+            let rc = unsafe { libc::syscall(libc::SYS_getpriority, libc::PRIO_PROCESS, 0_i32) };
             let err = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
             Ok((rc, err))
         })

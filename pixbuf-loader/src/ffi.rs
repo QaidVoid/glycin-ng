@@ -53,11 +53,8 @@ pub struct GdkPixbufFormat {
 
 pub type GdkPixbufModuleSizeFunc =
     unsafe extern "C" fn(width: *mut c_int, height: *mut c_int, data: *mut c_void);
-pub type GdkPixbufModulePreparedFunc = unsafe extern "C" fn(
-    pixbuf: *mut GdkPixbuf,
-    anim: *mut c_void,
-    data: *mut c_void,
-);
+pub type GdkPixbufModulePreparedFunc =
+    unsafe extern "C" fn(pixbuf: *mut GdkPixbuf, anim: *mut c_void, data: *mut c_void);
 pub type GdkPixbufModuleUpdatedFunc = unsafe extern "C" fn(
     pixbuf: *mut GdkPixbuf,
     x: c_int,
@@ -67,13 +64,10 @@ pub type GdkPixbufModuleUpdatedFunc = unsafe extern "C" fn(
     data: *mut c_void,
 );
 
-pub type LoadFn = unsafe extern "C" fn(
-    f: *mut libc::FILE,
-    error: *mut *mut GError,
-) -> *mut GdkPixbuf;
+pub type LoadFn =
+    unsafe extern "C" fn(f: *mut libc::FILE, error: *mut *mut GError) -> *mut GdkPixbuf;
 
-pub type LoadXpmDataFn =
-    unsafe extern "C" fn(data: *mut *const c_char) -> *mut GdkPixbuf;
+pub type LoadXpmDataFn = unsafe extern "C" fn(data: *mut *const c_char) -> *mut GdkPixbuf;
 
 pub type BeginLoadFn = unsafe extern "C" fn(
     size_func: Option<GdkPixbufModuleSizeFunc>,
@@ -83,10 +77,7 @@ pub type BeginLoadFn = unsafe extern "C" fn(
     error: *mut *mut GError,
 ) -> *mut c_void;
 
-pub type StopLoadFn = unsafe extern "C" fn(
-    context: *mut c_void,
-    error: *mut *mut GError,
-) -> c_int;
+pub type StopLoadFn = unsafe extern "C" fn(context: *mut c_void, error: *mut *mut GError) -> c_int;
 
 pub type LoadIncrementFn = unsafe extern "C" fn(
     context: *mut c_void,
@@ -95,10 +86,8 @@ pub type LoadIncrementFn = unsafe extern "C" fn(
     error: *mut *mut GError,
 ) -> c_int;
 
-pub type LoadAnimationFn = unsafe extern "C" fn(
-    f: *mut libc::FILE,
-    error: *mut *mut GError,
-) -> *mut c_void;
+pub type LoadAnimationFn =
+    unsafe extern "C" fn(f: *mut libc::FILE, error: *mut *mut GError) -> *mut c_void;
 
 #[repr(C)]
 pub struct GdkPixbufModule {
@@ -158,10 +147,7 @@ unsafe extern "C" {
         animation: *mut GdkPixbufSimpleAnim,
         pixbuf: *mut GdkPixbuf,
     );
-    pub fn gdk_pixbuf_simple_anim_set_loop(
-        animation: *mut GdkPixbufSimpleAnim,
-        loop_: c_int,
-    );
+    pub fn gdk_pixbuf_simple_anim_set_loop(animation: *mut GdkPixbufSimpleAnim, loop_: c_int);
 
     pub fn g_bytes_new(data: *const c_void, size: usize) -> *mut GBytes;
     pub fn g_bytes_unref(bytes: *mut GBytes);

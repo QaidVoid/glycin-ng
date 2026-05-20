@@ -193,12 +193,7 @@ mod tests {
 
     #[test]
     fn rgba8_passes_through() {
-        let t = tex(
-            MemoryFormat::R8g8b8a8,
-            vec![1, 2, 3, 4, 5, 6, 7, 8],
-            2,
-            1,
-        );
+        let t = tex(MemoryFormat::R8g8b8a8, vec![1, 2, 3, 4, 5, 6, 7, 8], 2, 1);
         let (bytes, stride) = texture_to_rgba8(&t);
         assert_eq!(stride, 8);
         assert_eq!(bytes, vec![1, 2, 3, 4, 5, 6, 7, 8]);

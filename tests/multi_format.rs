@@ -95,9 +95,6 @@ fn loader_decodes_png_with_strict_sandbox_on_linux() {
         result.unwrap();
     } else {
         let err = result.unwrap_err();
-        assert!(matches!(
-            err,
-            glycin_ng::Error::SandboxUnavailable(_)
-        ));
+        assert!(matches!(err, glycin_ng::Error::SandboxUnavailable(_)));
     }
 }

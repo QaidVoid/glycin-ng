@@ -100,9 +100,7 @@ pub unsafe extern "C" fn glycin_ng_loader_free(loader: *mut GlycinNgLoader) {
 ///
 /// `path` must be a valid pointer to a NUL-terminated string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn glycin_ng_loader_new_path(
-    path: *const c_char,
-) -> *mut GlycinNgLoader {
+pub unsafe extern "C" fn glycin_ng_loader_new_path(path: *const c_char) -> *mut GlycinNgLoader {
     clear_error();
     if path.is_null() {
         set_error("path is null");
@@ -224,9 +222,7 @@ pub unsafe extern "C" fn glycin_ng_loader_format_hint(
 /// `loader` must be a valid pointer returned by
 /// `glycin_ng_loader_new_*` and must not have been consumed or freed.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn glycin_ng_loader_load(
-    loader: *mut GlycinNgLoader,
-) -> *mut GlycinNgImage {
+pub unsafe extern "C" fn glycin_ng_loader_load(loader: *mut GlycinNgLoader) -> *mut GlycinNgImage {
     clear_error();
     if loader.is_null() {
         set_error("loader is null");
@@ -285,9 +281,7 @@ pub unsafe extern "C" fn glycin_ng_image_frame_count(image: *const GlycinNgImage
 /// `image` is NULL. The pointer is valid for the lifetime of the
 /// image handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn glycin_ng_image_format_name(
-    image: *const GlycinNgImage,
-) -> *const c_char {
+pub unsafe extern "C" fn glycin_ng_image_format_name(image: *const GlycinNgImage) -> *const c_char {
     let Some(img) = image_ref(image) else {
         return ptr::null();
     };

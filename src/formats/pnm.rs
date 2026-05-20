@@ -24,10 +24,7 @@ mod tests {
     fn decodes_p6_ppm() {
         // P6 header for 2x2 RGB followed by 12 bytes of pixel data.
         let mut bytes = b"P6\n2 2\n255\n".to_vec();
-        bytes.extend_from_slice(&[
-            255, 0, 0,   0, 255, 0,
-            0, 0, 255,   255, 255, 255,
-        ]);
+        bytes.extend_from_slice(&[255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255]);
         let image = decode(&bytes, &opts()).unwrap();
         assert_eq!(image.width(), 2);
         assert_eq!(image.height(), 2);
@@ -36,6 +33,9 @@ mod tests {
     #[test]
     fn rejects_garbage() {
         let err = decode(b"P0 garbage", &opts()).unwrap_err();
-        assert!(matches!(err, crate::Error::Malformed(_) | crate::Error::Io(_)));
+        assert!(matches!(
+            err,
+            crate::Error::Malformed(_) | crate::Error::Io(_)
+        ));
     }
 }

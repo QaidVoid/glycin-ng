@@ -9,8 +9,7 @@ use crate::{Error, Frame, Image, MemoryFormat, Result, Texture};
 use super::DecodeOptions;
 
 pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
-    let mut decoder =
-        tiff::decoder::Decoder::new(Cursor::new(bytes)).map_err(map_err)?;
+    let mut decoder = tiff::decoder::Decoder::new(Cursor::new(bytes)).map_err(map_err)?;
     let (width, height) = decoder.dimensions().map_err(map_err)?;
     opts.limits.check_dimensions(width, height, 1)?;
 
@@ -77,9 +76,7 @@ fn map_err(e: tiff::TiffError) -> Error {
     match e {
         E::IoError(io) => Error::Io(io),
         E::LimitsExceeded => Error::LimitExceeded("tiff internal"),
-        E::FormatError(_) | E::IntSizeError | E::UsageError(_) => {
-            Error::Malformed(e.to_string())
-        }
+        E::FormatError(_) | E::IntSizeError | E::UsageError(_) => Error::Malformed(e.to_string()),
         E::UnsupportedError(_) => Error::Decoder {
             format: "tiff",
             message: e.to_string(),
@@ -99,6 +96,9 @@ mod tests {
             apply_transformations: true,
         };
         let err = decode(b"II*\0garbage", &opts).unwrap_err();
-        assert!(matches!(err, Error::Malformed(_) | Error::Io(_) | Error::Decoder { .. }));
+        assert!(matches!(
+            err,
+            Error::Malformed(_) | Error::Io(_) | Error::Decoder { .. }
+        ));
     }
 }

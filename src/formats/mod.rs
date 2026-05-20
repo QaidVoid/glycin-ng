@@ -54,11 +54,7 @@ pub(crate) struct DecodeOptions {
 }
 
 /// Route a sniffed format to its decoder.
-pub(crate) fn dispatch(
-    format: KnownFormat,
-    bytes: &[u8],
-    opts: &DecodeOptions,
-) -> Result<Image> {
+pub(crate) fn dispatch(format: KnownFormat, bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     match format {
         #[cfg(feature = "png")]
         KnownFormat::Png => png::decode(bytes, opts),

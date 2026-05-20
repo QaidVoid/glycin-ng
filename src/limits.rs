@@ -70,12 +70,7 @@ impl Limits {
     /// `frames` is the number of frames the decoder will produce
     /// (1 for non-animated formats). Pre-decode header inspection
     /// should call this with the values pulled from the header.
-    pub fn check_dimensions(
-        &self,
-        width: u32,
-        height: u32,
-        frames: u32,
-    ) -> crate::Result<()> {
+    pub fn check_dimensions(&self, width: u32, height: u32, frames: u32) -> crate::Result<()> {
         if width > self.max_width {
             return Err(crate::Error::LimitExceeded("max_width"));
         }
@@ -89,9 +84,7 @@ impl Limits {
             .checked_mul(height as u64)
             .and_then(|p| p.checked_mul(frames as u64));
         match total {
-            Some(p) if p > self.max_pixels => {
-                Err(crate::Error::LimitExceeded("max_pixels"))
-            }
+            Some(p) if p > self.max_pixels => Err(crate::Error::LimitExceeded("max_pixels")),
             None => Err(crate::Error::LimitExceeded("max_pixels")),
             Some(_) => Ok(()),
         }
@@ -140,7 +133,9 @@ mod tests {
         let l = Limits::unlimited();
         // Force the multiplication to overflow u64 even though limits
         // are unbounded; we still report a LimitExceeded.
-        let e = l.check_dimensions(u32::MAX, u32::MAX, u32::MAX).unwrap_err();
+        let e = l
+            .check_dimensions(u32::MAX, u32::MAX, u32::MAX)
+            .unwrap_err();
         assert!(matches!(e, crate::Error::LimitExceeded("max_pixels")));
     }
 

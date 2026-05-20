@@ -110,7 +110,9 @@ pub unsafe extern "C" fn gly_loader_new(file: *mut GFile) -> *mut GObject {
         // resolve those; the caller will get a NULL handle.
         return ptr::null_mut();
     }
-    let path_owned = unsafe { CStr::from_ptr(path_ptr) }.to_string_lossy().into_owned();
+    let path_owned = unsafe { CStr::from_ptr(path_ptr) }
+        .to_string_lossy()
+        .into_owned();
     unsafe { ffi::g_free(path_ptr as *mut c_void) };
     let loader = Loader::new_path(PathBuf::from(path_owned));
     unsafe { attach_state(LoaderState::new(loader)) }
@@ -173,10 +175,7 @@ pub unsafe extern "C" fn gly_loader_new_for_stream(stream: *mut GInputStream) ->
 /// # Safety
 /// `loader` must be a Loader handle returned from `gly_loader_new*`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn gly_loader_set_sandbox_selector(
-    loader: *mut GObject,
-    selector: c_int,
-) {
+pub unsafe extern "C" fn gly_loader_set_sandbox_selector(loader: *mut GObject, selector: c_int) {
     let Some(state) = (unsafe { state_ref::<LoaderState>(loader) }) else {
         return;
     };
@@ -276,9 +275,7 @@ pub unsafe extern "C" fn gly_image_get_height(image: *mut GObject) -> u32 {
 /// # Safety
 /// `image` must be valid or NULL.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn gly_image_get_transformation_orientation(
-    image: *mut GObject,
-) -> u16 {
+pub unsafe extern "C" fn gly_image_get_transformation_orientation(image: *mut GObject) -> u16 {
     unsafe { state_ref::<ImageState>(image) }
         .map(|s| s.image.orientation().exif_value())
         .unwrap_or(1)

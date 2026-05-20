@@ -60,8 +60,7 @@ pub(crate) fn apply() -> SeccompPosture {
         allowed.push(libc::SYS_arch_prctl);
     }
 
-    let rules: BTreeMap<i64, Vec<_>> =
-        allowed.into_iter().map(|sc| (sc, Vec::new())).collect();
+    let rules: BTreeMap<i64, Vec<_>> = allowed.into_iter().map(|sc| (sc, Vec::new())).collect();
 
     let filter = match SeccompFilter::new(
         rules,

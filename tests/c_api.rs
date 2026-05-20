@@ -25,10 +25,7 @@ unsafe extern "C" {
         rlimit: i32,
         strict: i32,
     ) -> i32;
-    fn glycin_ng_loader_format_hint(
-        loader: *mut GlycinNgLoader,
-        format: c_uint,
-    ) -> i32;
+    fn glycin_ng_loader_format_hint(loader: *mut GlycinNgLoader, format: c_uint) -> i32;
     fn glycin_ng_loader_load(loader: *mut GlycinNgLoader) -> *mut GlycinNgImage;
     fn glycin_ng_image_free(image: *mut GlycinNgImage);
     fn glycin_ng_image_width(image: *const GlycinNgImage) -> u32;
@@ -63,8 +60,7 @@ fn encode_rgba_png(width: u32, height: u32) -> Vec<u8> {
 #[test]
 fn loader_new_bytes_returns_handle() {
     let bytes = encode_rgba_png(4, 4);
-    let loader =
-        unsafe { glycin_ng_loader_new_bytes(bytes.as_ptr(), bytes.len()) };
+    let loader = unsafe { glycin_ng_loader_new_bytes(bytes.as_ptr(), bytes.len()) };
     assert!(!loader.is_null());
     unsafe { glycin_ng_loader_free(loader) };
 }
@@ -80,8 +76,7 @@ fn loader_new_bytes_with_null_returns_null() {
 #[test]
 fn decode_png_through_c_api() {
     let bytes = encode_rgba_png(8, 8);
-    let loader =
-        unsafe { glycin_ng_loader_new_bytes(bytes.as_ptr(), bytes.len()) };
+    let loader = unsafe { glycin_ng_loader_new_bytes(bytes.as_ptr(), bytes.len()) };
     assert!(!loader.is_null());
 
     let rc = unsafe { glycin_ng_loader_sandbox(loader, 0, 0, 0, 0) };
@@ -123,8 +118,7 @@ fn decode_png_through_c_api() {
 #[test]
 fn decode_garbage_returns_null_with_error_message() {
     let bytes = b"not a png at all".to_vec();
-    let loader =
-        unsafe { glycin_ng_loader_new_bytes(bytes.as_ptr(), bytes.len()) };
+    let loader = unsafe { glycin_ng_loader_new_bytes(bytes.as_ptr(), bytes.len()) };
     assert!(!loader.is_null());
     let image = unsafe { glycin_ng_loader_load(loader) };
     assert!(image.is_null());

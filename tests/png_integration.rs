@@ -55,10 +55,7 @@ fn sandbox_is_active_during_decode_by_default() {
     // We assert that at least one of them landed; on kernels without
     // landlock the test only asserts seccomp.
     let landlock_enforced = matches!(posture.landlock, LandlockPosture::Enforced { .. });
-    let seccomp_enforced = matches!(
-        posture.seccomp,
-        glycin_ng::SeccompPosture::Enforced
-    );
+    let seccomp_enforced = matches!(posture.seccomp, glycin_ng::SeccompPosture::Enforced);
     assert!(
         landlock_enforced || seccomp_enforced,
         "expected landlock or seccomp to be enforced; got {posture:?}"
@@ -88,10 +85,7 @@ fn loader_honors_limits() {
         ..Limits::default()
     };
     let err = Loader::new_bytes(bytes).limits(limits).load().unwrap_err();
-    assert!(matches!(
-        err,
-        glycin_ng::Error::LimitExceeded("max_width")
-    ));
+    assert!(matches!(err, glycin_ng::Error::LimitExceeded("max_width")));
 }
 
 #[test]

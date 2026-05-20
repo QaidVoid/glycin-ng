@@ -49,9 +49,7 @@ pub(crate) fn to_gly(format: MemoryFormat) -> i32 {
         MemoryFormat::R16g16b16Float => GLY_MEMORY_R16G16B16_FLOAT,
         MemoryFormat::R16g16b16a16Float => GLY_MEMORY_R16G16B16A16_FLOAT,
         MemoryFormat::R32g32b32Float => GLY_MEMORY_R32G32B32_FLOAT,
-        MemoryFormat::R32g32b32a32FloatPremultiplied => {
-            GLY_MEMORY_R32G32B32A32_FLOAT_PREMULTIPLIED
-        }
+        MemoryFormat::R32g32b32a32FloatPremultiplied => GLY_MEMORY_R32G32B32A32_FLOAT_PREMULTIPLIED,
         MemoryFormat::R32g32b32a32Float => GLY_MEMORY_R32G32B32A32_FLOAT,
         MemoryFormat::G8a8Premultiplied => GLY_MEMORY_G8A8_PREMULTIPLIED,
         MemoryFormat::G8a8 => GLY_MEMORY_G8A8,
