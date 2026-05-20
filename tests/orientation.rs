@@ -66,6 +66,50 @@ fn orientation_is_reported_but_not_baked_when_off() {
 }
 
 #[test]
+fn every_exif_orientation_value_round_trips() {
+    use glycin_ng::Orientation;
+    for (raw, expected) in [
+        (1, Orientation::Normal),
+        (2, Orientation::FlipHorizontal),
+        (3, Orientation::Rotate180),
+        (4, Orientation::FlipVertical),
+        (5, Orientation::Transpose),
+        (6, Orientation::Rotate90),
+        (7, Orientation::Transverse),
+        (8, Orientation::Rotate270),
+    ] {
+        let exif = build_exif_orientation(raw);
+        let bytes = encode_png_with_exif(2, 3, &exif);
+        let image = Loader::new_bytes(bytes)
+            .apply_transformations(false)
+            .load()
+            .unwrap();
+        assert_eq!(
+            image.orientation(),
+            expected,
+            "raw value {raw} should map to {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn baked_orientation_results_in_normal() {
+    for raw in [2, 3, 4, 5, 6, 7, 8] {
+        let exif = build_exif_orientation(raw);
+        let bytes = encode_png_with_exif(2, 3, &exif);
+        let image = Loader::new_bytes(bytes)
+            .apply_transformations(true)
+            .load()
+            .unwrap();
+        assert_eq!(
+            image.orientation(),
+            Orientation::Normal,
+            "baked image should report Normal regardless of input ({raw})"
+        );
+    }
+}
+
+#[test]
 fn missing_exif_keeps_normal_orientation() {
     let mut out = Vec::new();
     {

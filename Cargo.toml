@@ -100,10 +100,20 @@ default-features = false
 features = ["bmp", "ico", "tga", "pnm", "dds"]
 
 [dev-dependencies]
+criterion = { version = "0.7.0", features = ["html_reports"] }
 gif = "0.13"
 png = "0.18"
 qoi = "0.4"
 tempfile = "3"
+
+[[bench]]
+name = "decode"
+harness = false
+required-features = ["png", "qoi"]
+
+[[bench]]
+name = "sandbox_overhead"
+harness = false
 
 [profile.release]
 lto = "thin"
