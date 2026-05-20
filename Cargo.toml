@@ -1,40 +1,98 @@
-[workspace]
-members = [".", "libglycin-shim", "pixbuf-loader"]
-
 [package]
 name = "glycin-ng"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.87"
 description = "Permissively-licensed Rust image decoder library with in-process sandboxing"
 license = "MIT OR Apache-2.0"
-keywords = ["image", "decoder", "sandbox", "landlock", "seccomp"]
-categories = ["multimedia::images", "encoding"]
-rust-version = "1.85"
+keywords = ["decoder", "image", "landlock", "sandbox", "seccomp"]
+categories = ["encoding", "multimedia::images"]
+
+[workspace]
+members = [".", "libglycin-shim", "pixbuf-loader"]
 
 [lib]
+crate-type = ["cdylib", "rlib"]
 name = "glycin_ng"
 path = "src/lib.rs"
-crate-type = ["rlib", "cdylib"]
+
+[[bench]]
+harness = false
+name = "decode"
+required-features = ["png", "qoi"]
+
+[[bench]]
+harness = false
+name = "sandbox_overhead"
+
+[dependencies]
+thiserror = "2"
+
+[dependencies.gif]
+version = "0.14"
+optional = true
+
+[dependencies.image]
+version = "0.25"
+default-features = false
+features = ["bmp", "dds", "ico", "pnm", "tga"]
+optional = true
+
+[dependencies.image-webp]
+version = "0.2"
+optional = true
+
+[dependencies.jpeg-decoder]
+version = "0.3"
+optional = true
+
+[dependencies.jxl-oxide]
+version = "0.12"
+optional = true
+
+[dependencies.png]
+version = "0.18"
+optional = true
+
+[dependencies.qoi]
+version = "0.4"
+optional = true
+
+[dependencies.tiff]
+version = "0.11"
+optional = true
+
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
+gif = "0.14"
+png = "0.18"
+qoi = "0.4"
+tempfile = "3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = { version = "0.4", optional = true }
+libc = "0.2"
+seccompiler = { version = "0.5", optional = true }
 
 [features]
 default = [
-    "decode",
-    "metadata",
-    "landlock",
-    "seccomp",
-    "png",
-    "jpeg",
-    "gif",
-    "webp",
-    "tiff",
-    "bmp",
-    "ico",
-    "tga",
-    "qoi",
-    "exr",
-    "pnm",
-    "dds",
-    "jxl",
+  "bmp",
+  "dds",
+  "decode",
+  "exr",
+  "gif",
+  "ico",
+  "jpeg",
+  "jxl",
+  "landlock",
+  "metadata",
+  "png",
+  "pnm",
+  "qoi",
+  "seccomp",
+  "tga",
+  "tiff",
+  "webp",
 ]
 
 decode = []
@@ -46,77 +104,19 @@ seccomp = ["dep:seccompiler"]
 
 c-api = []
 
-png = ["dep:png"]
-jpeg = ["dep:jpeg-decoder"]
-gif = ["dep:gif"]
-webp = ["dep:image-webp"]
-tiff = ["dep:tiff"]
 bmp = ["dep:image"]
-ico = ["dep:image"]
-tga = ["dep:image"]
-qoi = ["dep:qoi"]
-exr = ["dep:image", "image/exr"]
-pnm = ["dep:image"]
 dds = ["dep:image"]
+exr = ["dep:image", "image/exr"]
+gif = ["dep:gif"]
+ico = ["dep:image"]
+jpeg = ["dep:jpeg-decoder"]
 jxl = ["dep:jxl-oxide"]
-
-[dependencies]
-thiserror = "2"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-landlock = { version = "0.4", optional = true }
-seccompiler = { version = "0.5", optional = true }
-libc = "0.2"
-
-[dependencies.png]
-version = "0.18"
-optional = true
-
-[dependencies.jpeg-decoder]
-version = "0.3"
-optional = true
-
-[dependencies.gif]
-version = "0.13"
-optional = true
-
-[dependencies.image-webp]
-version = "0.2"
-optional = true
-
-[dependencies.tiff]
-version = "0.10"
-optional = true
-
-[dependencies.qoi]
-version = "0.4"
-optional = true
-
-[dependencies.jxl-oxide]
-version = "0.12"
-optional = true
-
-[dependencies.image]
-version = "0.25"
-optional = true
-default-features = false
-features = ["bmp", "ico", "tga", "pnm", "dds"]
-
-[dev-dependencies]
-criterion = { version = "0.7.0", features = ["html_reports"] }
-gif = "0.13"
-png = "0.18"
-qoi = "0.4"
-tempfile = "3"
-
-[[bench]]
-name = "decode"
-harness = false
-required-features = ["png", "qoi"]
-
-[[bench]]
-name = "sandbox_overhead"
-harness = false
+png = ["dep:png"]
+pnm = ["dep:image"]
+qoi = ["dep:qoi"]
+tga = ["dep:image"]
+tiff = ["dep:tiff"]
+webp = ["dep:image-webp"]
 
 [profile.release]
 opt-level = "z"

@@ -2,14 +2,14 @@
 name = "glycin-ng-pixbuf-loader"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.87"
 description = "gdk-pixbuf loader module backed by glycin-ng"
 license = "MIT OR Apache-2.0"
-rust-version = "1.85"
 
 [lib]
+crate-type = ["cdylib"]
 name = "pixbufloader_glycin_ng"
 path = "src/lib.rs"
-crate-type = ["cdylib"]
 
 [dependencies]
 libc = "0.2"
@@ -18,22 +18,21 @@ libc = "0.2"
 path = ".."
 default-features = false
 features = [
-    "decode",
-    "metadata",
-    "landlock",
-    "seccomp",
-    "png",
-    "jpeg",
-    "gif",
-    "webp",
-    "tiff",
-    "bmp",
-    "ico",
-    "tga",
-    "qoi",
-    "exr",
-    "pnm",
-    "dds",
-    "jxl",
+  "bmp",
+  "dds",
+  "decode",
+  "exr",
+  "gif",
+  "ico",
+  "jpeg",
+  "jxl",
+  "landlock",
+  "metadata",
+  "png",
+  "pnm",
+  "qoi",
+  "seccomp",
+  "tga",
+  "tiff",
+  "webp",
 ]
-

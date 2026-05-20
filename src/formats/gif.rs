@@ -77,6 +77,10 @@ fn map_err(e: gif::DecodingError) -> Error {
     match e {
         gif::DecodingError::Io(io) => Error::Io(io),
         gif::DecodingError::Format(msg) => Error::Malformed(msg.to_string()),
+        other => Error::Decoder {
+            format: "gif",
+            message: other.to_string(),
+        },
     }
 }
 
@@ -121,6 +125,9 @@ mod tests {
     #[test]
     fn rejects_garbage() {
         let err = decode(b"GIF89aGARBAGE", &opts()).unwrap_err();
-        assert!(matches!(err, Error::Malformed(_) | Error::Io(_)));
+        assert!(matches!(
+            err,
+            Error::Malformed(_) | Error::Io(_) | Error::Decoder { .. }
+        ));
     }
 }

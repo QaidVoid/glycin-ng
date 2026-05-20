@@ -2,45 +2,42 @@
 name = "glycin-ng-libglycin-shim"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.87"
 description = "libglycin-2.so.0 compat shim that forwards to glycin-ng"
 license = "MIT OR Apache-2.0"
-rust-version = "1.85"
 
 [lib]
+crate-type = ["cdylib"]
 name = "glycin_2"
 path = "src/lib.rs"
-crate-type = ["cdylib"]
-
-[features]
-default = []
-# Pulls in `resvg` and `usvg` for SVG rasterization. Both are
-# MIT OR Apache-2.0 as of the 0.45.x line, so enabling this feature
-# stays inside the permissive-only contract.
-svg = ["dep:resvg"]
 
 [dependencies]
 libc = "0.2"
-resvg = { version = "0.45", default-features = false, optional = true }
+resvg = { version = "0.47", default-features = false, optional = true }
 
 [dependencies.glycin-ng]
 path = ".."
 default-features = false
 features = [
-    "decode",
-    "metadata",
-    "landlock",
-    "seccomp",
-    "png",
-    "jpeg",
-    "gif",
-    "webp",
-    "tiff",
-    "bmp",
-    "ico",
-    "tga",
-    "qoi",
-    "exr",
-    "pnm",
-    "dds",
-    "jxl",
+  "bmp",
+  "dds",
+  "decode",
+  "exr",
+  "gif",
+  "ico",
+  "jpeg",
+  "jxl",
+  "landlock",
+  "metadata",
+  "png",
+  "pnm",
+  "qoi",
+  "seccomp",
+  "tga",
+  "tiff",
+  "webp",
 ]
+
+[features]
+default = []
+svg = ["dep:resvg"]
