@@ -1,0 +1,110 @@
+[package]
+name = "glycin-ng-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+glycin-ng = { path = ".." }
+
+[[bin]]
+name = "sniff"
+path = "fuzz_targets/sniff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "png_decode"
+path = "fuzz_targets/png_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "jpeg_decode"
+path = "fuzz_targets/jpeg_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gif_decode"
+path = "fuzz_targets/gif_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "webp_decode"
+path = "fuzz_targets/webp_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tiff_decode"
+path = "fuzz_targets/tiff_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bmp_decode"
+path = "fuzz_targets/bmp_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ico_decode"
+path = "fuzz_targets/ico_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tga_decode"
+path = "fuzz_targets/tga_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "qoi_decode"
+path = "fuzz_targets/qoi_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "exr_decode"
+path = "fuzz_targets/exr_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pnm_decode"
+path = "fuzz_targets/pnm_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dds_decode"
+path = "fuzz_targets/dds_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "jxl_decode"
+path = "fuzz_targets/jxl_decode.rs"
+test = false
+doc = false
+bench = false

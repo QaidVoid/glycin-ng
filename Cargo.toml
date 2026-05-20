@@ -1,0 +1,110 @@
+[package]
+name = "glycin-ng"
+version = "0.1.0"
+edition = "2024"
+description = "Permissively-licensed Rust image decoder library with in-process sandboxing"
+license = "MIT OR Apache-2.0"
+keywords = ["image", "decoder", "sandbox", "landlock", "seccomp"]
+categories = ["multimedia::images", "encoding"]
+rust-version = "1.85"
+
+[lib]
+name = "glycin_ng"
+path = "src/lib.rs"
+
+[features]
+default = [
+    "decode",
+    "metadata",
+    "landlock",
+    "seccomp",
+    "png",
+    "jpeg",
+    "gif",
+    "webp",
+    "tiff",
+    "bmp",
+    "ico",
+    "tga",
+    "qoi",
+    "exr",
+    "pnm",
+    "dds",
+    "jxl",
+]
+
+decode = []
+encode = []
+metadata = []
+
+landlock = ["dep:landlock"]
+seccomp = ["dep:seccompiler"]
+
+c-api = []
+
+png = ["dep:png"]
+jpeg = ["dep:jpeg-decoder"]
+gif = ["dep:gif"]
+webp = ["dep:image-webp"]
+tiff = ["dep:tiff"]
+bmp = ["dep:image"]
+ico = ["dep:image"]
+tga = ["dep:image"]
+qoi = ["dep:qoi"]
+exr = ["dep:exr"]
+pnm = ["dep:image"]
+dds = ["dep:image"]
+jxl = ["dep:jxl-oxide"]
+
+[dependencies]
+thiserror = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = { version = "0.4", optional = true }
+seccompiler = { version = "0.5", optional = true }
+libc = "0.2"
+
+[dependencies.png]
+version = "0.18"
+optional = true
+
+[dependencies.jpeg-decoder]
+version = "0.3"
+optional = true
+
+[dependencies.gif]
+version = "0.13"
+optional = true
+
+[dependencies.image-webp]
+version = "0.2"
+optional = true
+
+[dependencies.tiff]
+version = "0.10"
+optional = true
+
+[dependencies.qoi]
+version = "0.4"
+optional = true
+
+[dependencies.exr]
+version = "1"
+optional = true
+
+[dependencies.jxl-oxide]
+version = "0.12"
+optional = true
+
+[dependencies.image]
+version = "0.25"
+optional = true
+default-features = false
+features = ["bmp", "ico", "tga", "pnm", "dds"]
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
