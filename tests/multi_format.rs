@@ -98,3 +98,20 @@ fn loader_decodes_png_with_strict_sandbox_on_linux() {
         assert!(matches!(err, glycin_ng::Error::SandboxUnavailable(_)));
     }
 }
+
+#[test]
+#[cfg(feature = "jpeg")]
+fn loader_decodes_jpeg_with_strict_sandbox_on_linux() {
+    // jpeg-decoder lazily initializes a rayon thread pool, which calls
+    // clone3 to spawn workers. Regression for a panic seen when the
+    // seccomp allowlist omitted thread-creation syscalls.
+    let bytes = include_bytes!("data/tiny.jpg").to_vec();
+    let result = Loader::new_bytes(bytes).require_sandbox().load();
+    if cfg!(target_os = "linux") {
+        let image = result.unwrap();
+        assert_eq!(image.format_name(), "jpeg");
+    } else {
+        let err = result.unwrap_err();
+        assert!(matches!(err, glycin_ng::Error::SandboxUnavailable(_)));
+    }
+}

@@ -371,10 +371,12 @@ mod tests {
             strict: false,
         };
         let (rc_and_errno, posture) = run_in_worker(selector, Limits::default(), || {
-            // SYS_getpriority is not in the allowlist; expect -1 with
-            // errno EPERM.
+            // SYS_socket is intentionally outside the allowlist because
+            // network containment is a core property of the in-process
+            // sandbox. Expect -1 with errno EPERM.
             // SAFETY: only invokes a single syscall through libc.
-            let rc = unsafe { libc::syscall(libc::SYS_getpriority, libc::PRIO_PROCESS, 0_i32) };
+            let rc =
+                unsafe { libc::syscall(libc::SYS_socket, libc::AF_INET, libc::SOCK_STREAM, 0_i32) };
             let err = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
             Ok((rc, err))
         })
