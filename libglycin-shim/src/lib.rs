@@ -25,7 +25,7 @@ use std::ptr;
 use std::slice;
 use std::sync::OnceLock;
 
-use glycin_ng::{Loader, SandboxSelector};
+use glycin_ng::Loader;
 
 use crate::ffi::{
     GBytes, GError, GFile, GInputStream, GObject, GQuark, GStrv, GType, gboolean, gpointer,
@@ -172,20 +172,16 @@ pub unsafe extern "C" fn gly_loader_new_for_stream(stream: *mut GInputStream) ->
 
 // ----- gly_loader_set_* -----
 
+/// Accepted for ABI compatibility, but ignored. The in-process
+/// landlock + seccomp + rlimit posture is fixed and cannot be
+/// disabled through this entrypoint, so an `LD_PRELOAD` that pins
+/// the upstream `NOT_SANDBOXED` selector has no effect here.
+///
 /// # Safety
-/// `loader` must be a Loader handle returned from `gly_loader_new*`.
+/// `loader` may be NULL or a Loader handle returned from
+/// `gly_loader_new*`; either way nothing is read or written.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn gly_loader_set_sandbox_selector(loader: *mut GObject, selector: c_int) {
-    let Some(state) = (unsafe { state_ref::<LoaderState>(loader) }) else {
-        return;
-    };
-    let mapped = match selector {
-        // GLY_SANDBOX_SELECTOR_NOT_SANDBOXED
-        3 => SandboxSelector::none(),
-        _ => SandboxSelector::default(),
-    };
-    *state.sandbox.lock().unwrap() = mapped;
-}
+pub unsafe extern "C" fn gly_loader_set_sandbox_selector(_loader: *mut GObject, _selector: c_int) {}
 
 /// # Safety
 /// `loader` must be valid.
@@ -234,14 +230,10 @@ pub unsafe extern "C" fn gly_loader_load(
         }
     };
 
-    let sandbox = *state.sandbox.lock().unwrap();
     let apply = *state.apply_transformations.lock().unwrap();
     let limits = *state.limits.lock().unwrap();
 
-    let configured = inner
-        .sandbox_selector(sandbox)
-        .apply_transformations(apply)
-        .limits(limits);
+    let configured = inner.apply_transformations(apply).limits(limits);
 
     match configured.load() {
         Ok(image) => unsafe { attach_state(ImageState::new(image)) },

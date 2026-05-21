@@ -2,14 +2,13 @@
 
 use std::sync::Mutex;
 
-use glycin_ng::{Frame, Image, Limits, Loader, SandboxSelector};
+use glycin_ng::{Frame, Image, Limits, Loader};
 
 /// State backing a `GlyLoader`. The inner [`Loader`] is consumed on
 /// `gly_loader_load`, so it lives behind an `Option` we can `take()`.
 pub(crate) struct LoaderState {
     pub(crate) inner: Mutex<Option<Loader>>,
     pub(crate) apply_transformations: Mutex<bool>,
-    pub(crate) sandbox: Mutex<SandboxSelector>,
     pub(crate) limits: Mutex<Limits>,
 }
 
@@ -18,7 +17,6 @@ impl LoaderState {
         Self {
             inner: Mutex::new(Some(loader)),
             apply_transformations: Mutex::new(true),
-            sandbox: Mutex::new(SandboxSelector::default()),
             limits: Mutex::new(Limits::default()),
         }
     }

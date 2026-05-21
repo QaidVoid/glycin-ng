@@ -40,10 +40,10 @@ Load path:
 - `gly_loader_new` (path-backed `GFile`)
 - `gly_loader_new_for_bytes`
 - `gly_loader_new_for_stream` (whole stream read into memory)
-- `gly_loader_set_sandbox_selector` (maps the four upstream values
-  onto `glycin_ng`'s `SandboxSelector::default()` /
-  `SandboxSelector::none()`; bwrap / flatpak-spawn selections fall
-  back to the in-process layered sandbox)
+- `gly_loader_set_sandbox_selector` (accepted for ABI compatibility
+  but ignored; the in-process landlock + seccomp + rlimit posture is
+  fixed, so an `LD_PRELOAD` that pins the upstream `NOT_SANDBOXED`
+  selector cannot disable the sandbox here)
 - `gly_loader_set_apply_transformations`
 - `gly_loader_set_accepted_memory_formats` (accepted but currently
   ignored - decoders return their native format)
