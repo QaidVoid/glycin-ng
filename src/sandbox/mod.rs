@@ -11,7 +11,11 @@ pub(crate) mod landlock;
 pub(crate) mod rlimit;
 pub(crate) mod seccomp;
 
+use std::sync::OnceLock;
+
 use crate::{Error, Limits, Result};
+
+const WORKER_THREAD_NAME: &str = "glycin-ng-worker";
 
 /// Result of applying every requested sandbox layer for one decode.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -157,8 +161,10 @@ where
     F: FnOnce() -> Result<R> + Send + 'static,
     R: Send + 'static,
 {
+    install_silent_worker_panic_hook();
+
     let handle = std::thread::Builder::new()
-        .name("glycin-ng-worker".into())
+        .name(WORKER_THREAD_NAME.into())
         .spawn(move || -> Result<(R, SandboxPosture)> {
             let posture = apply_layers(selector, limits);
             check_strict(&selector, &posture)?;
@@ -171,6 +177,27 @@ where
         Ok(r) => r,
         Err(payload) => Err(Error::Internal(panic_message(payload))),
     }
+}
+
+/// Install a process-wide panic hook (once) that silences panics on
+/// the decode worker thread. The panic payload is still captured via
+/// [`std::thread::JoinHandle::join`] and surfaced as
+/// [`Error::Internal`], so callers see the message through the
+/// regular error channel; suppressing the default hook only avoids
+/// noisy stderr output when a denied syscall (e.g. a future
+/// allowlist gap) crashes a decoder mid-frame. Panics from any other
+/// thread are delegated to the prior hook unchanged.
+fn install_silent_worker_panic_hook() {
+    static INSTALLED: OnceLock<()> = OnceLock::new();
+    INSTALLED.get_or_init(|| {
+        let prior = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if std::thread::current().name() == Some(WORKER_THREAD_NAME) {
+                return;
+            }
+            prior(info);
+        }));
+    });
 }
 
 fn apply_layers(s: SandboxSelector, l: Limits) -> SandboxPosture {
