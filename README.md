@@ -170,14 +170,11 @@ crate ships built-in regression tests asserting both that an unlisted
 syscall (`socket`) is denied under seccomp, and that the worker
 spawns a rayon pool for JPEG / JXL without tripping `clone3`.
 
-Per-decode overhead (Linux 6.x x86_64, criterion, 1x1 PNG):
-
-| Posture            | Overhead  |
-|--------------------|-----------|
-| No sandbox         | ~30 us    |
-| Landlock only      | ~32 us    |
-| Seccomp only       | ~130 us   |
-| Landlock + seccomp | ~128 us   |
+The dominant cost is the seccomp install: the BPF program is
+JIT-compiled into the kernel on every `prctl(PR_SET_SECCOMP)`, so its
+overhead scales with the size of the allowlist. Landlock adds a
+single-digit microsecond cost on top. Run `cargo bench --bench
+sandbox_overhead` for the numbers on your specific hardware.
 
 ## Limits
 
