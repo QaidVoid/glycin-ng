@@ -1,5 +1,7 @@
 //! SVG decoder via `resvg` and `usvg`.
 
+mod xinclude;
+
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg::{Options, Tree};
 
@@ -9,7 +11,16 @@ use super::DecodeOptions;
 
 pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     let parse_opt = Options::default();
-    let tree = Tree::from_data(bytes, &parse_opt).map_err(|e| Error::Malformed(e.to_string()))?;
+    let owned;
+    let svg_bytes: &[u8] = match xinclude::expand(bytes) {
+        Some(expanded) => {
+            owned = expanded;
+            &owned
+        }
+        None => bytes,
+    };
+    let tree =
+        Tree::from_data(svg_bytes, &parse_opt).map_err(|e| Error::Malformed(e.to_string()))?;
     let svg_size = tree.size();
     let width = svg_size.width().ceil().max(1.0) as u32;
     let height = svg_size.height().ceil().max(1.0) as u32;
@@ -46,6 +57,8 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine;
+
     use super::*;
     use crate::Limits;
 
@@ -78,6 +91,33 @@ mod tests {
     fn rejects_garbage() {
         let err = decode(b"<svg garbage>not really svg", &opts()).unwrap_err();
         assert!(matches!(err, Error::Malformed(_) | Error::Decoder { .. }));
+    }
+
+    #[test]
+    fn decodes_gtk_symbolic_recolor_wrapper() {
+        // The outer wrapper GTK builds when loading a symbolic icon:
+        // outer <svg> with a recolor <style>, then an <xi:include>
+        // pulling the original 4x4 red SVG as a base64 data URI.
+        // Without the xinclude pass this renders as a fully
+        // transparent 16x16 image, which is what made the toolbar
+        // icons disappear in Ristretto.
+        let inner = b"<?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\"><rect width=\"4\" height=\"4\" fill=\"#2e3436\"/></svg>";
+        let inner_b64 = base64::engine::general_purpose::STANDARD.encode(inner);
+        let wrapper = format!(
+            r#"<?xml version="1.0"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xi="http://www.w3.org/2001/XInclude" width="4" height="4">
+  <style>rect, path {{ fill: rgb(255, 0, 0) !important; }}</style>
+  <g><xi:include href="data:text/xml;base64,{inner_b64}"/></g>
+</svg>"#
+        );
+
+        let image = decode(wrapper.as_bytes(), &opts()).unwrap();
+        let data = image.first_frame().unwrap().texture().data();
+        let alpha_set = data.chunks_exact(4).filter(|p| p[3] != 0).count();
+        assert!(
+            alpha_set > 0,
+            "expected non-transparent output after xi:include expansion"
+        );
     }
 
     #[test]

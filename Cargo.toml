@@ -26,6 +26,8 @@ harness = false
 name = "sandbox_overhead"
 
 [dependencies]
+base64 = { version = "0.22.1", optional = true }
+quick-xml = { version = "0.40.1", optional = true }
 thiserror = "2"
 
 [dependencies.gif]
@@ -120,7 +122,7 @@ jxl = ["dep:jxl-oxide"]
 png = ["dep:png"]
 pnm = ["dep:image"]
 qoi = ["dep:qoi"]
-svg = ["dep:resvg"]
+svg = ["dep:resvg", "dep:base64", "dep:quick-xml"]
 tga = ["dep:image"]
 tiff = ["dep:tiff"]
 webp = ["dep:image-webp"]
