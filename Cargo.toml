@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "Permissively-licensed Rust image decoder library with in-process sandboxing"
+repository = "https://github.com/QaidVoid/glycin-ng"
 keywords = ["decoder", "image", "landlock", "sandbox", "seccomp"]
 categories = ["encoding", "multimedia::images"]
 

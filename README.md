@@ -1,5 +1,10 @@
 # glycin-ng
 
+[![Crates.io](https://img.shields.io/crates/v/glycin-ng.svg?logo=rust)](https://crates.io/crates/glycin-ng)
+[![Docs.rs](https://img.shields.io/docsrs/glycin-ng.svg?logo=docs.rs)](https://docs.rs/glycin-ng)
+[![License](https://img.shields.io/crates/l/glycin-ng.svg)](#license)
+[![cargo-deny](https://github.com/QaidVoid/glycin-ng/actions/workflows/deny.yml/badge.svg)](https://github.com/QaidVoid/glycin-ng/actions/workflows/deny.yml)
+
 In-process image decoder for Linux desktop stacks. Pure-Rust codecs
 behind a single shared library, layered landlock + seccomp sandbox
 applied per decode, no helper processes.
@@ -57,12 +62,6 @@ If you don't need an in-process boundary and want every available
 codec including the LGPL ones, you want upstream glycin. If you want
 permissive licensing or you're packaging into something already
 sandboxed where bwrap nesting is awkward, you want this.
-
-## Status
-
-Pre-release. Public Rust and C surfaces are stable enough to integrate
-against. Not yet on crates.io. Linux is the first-class target; the
-sandbox no-ops on other platforms and the library still decodes.
 
 ## Quickstart
 
