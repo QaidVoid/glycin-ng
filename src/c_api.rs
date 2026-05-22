@@ -530,6 +530,8 @@ pub const GLYCIN_NG_KFMT_PNM: c_uint = 11;
 pub const GLYCIN_NG_KFMT_DDS: c_uint = 12;
 /// Known-format constant: JPEG XL.
 pub const GLYCIN_NG_KFMT_JXL: c_uint = 13;
+/// Known-format constant: SVG.
+pub const GLYCIN_NG_KFMT_SVG: c_uint = 14;
 
 fn c_uint_to_format(value: c_uint) -> Option<KnownFormat> {
     Some(match value {
@@ -546,8 +548,69 @@ fn c_uint_to_format(value: c_uint) -> Option<KnownFormat> {
         GLYCIN_NG_KFMT_PNM => KnownFormat::Pnm,
         GLYCIN_NG_KFMT_DDS => KnownFormat::Dds,
         GLYCIN_NG_KFMT_JXL => KnownFormat::Jxl,
+        GLYCIN_NG_KFMT_SVG => KnownFormat::Svg,
         _ => return None,
     })
+}
+
+fn format_to_c_uint(f: KnownFormat) -> c_uint {
+    match f {
+        KnownFormat::Png => GLYCIN_NG_KFMT_PNG,
+        KnownFormat::Jpeg => GLYCIN_NG_KFMT_JPEG,
+        KnownFormat::Gif => GLYCIN_NG_KFMT_GIF,
+        KnownFormat::WebP => GLYCIN_NG_KFMT_WEBP,
+        KnownFormat::Tiff => GLYCIN_NG_KFMT_TIFF,
+        KnownFormat::Bmp => GLYCIN_NG_KFMT_BMP,
+        KnownFormat::Ico => GLYCIN_NG_KFMT_ICO,
+        KnownFormat::Tga => GLYCIN_NG_KFMT_TGA,
+        KnownFormat::Qoi => GLYCIN_NG_KFMT_QOI,
+        KnownFormat::Exr => GLYCIN_NG_KFMT_EXR,
+        KnownFormat::Pnm => GLYCIN_NG_KFMT_PNM,
+        KnownFormat::Dds => GLYCIN_NG_KFMT_DDS,
+        KnownFormat::Jxl => GLYCIN_NG_KFMT_JXL,
+        KnownFormat::Svg => GLYCIN_NG_KFMT_SVG,
+    }
+}
+
+/// Resolve an IANA media type (e.g. `"image/png"`) to a known-format
+/// constant. Returns one of the `GLYCIN_NG_KFMT_*` values on success,
+/// or 0 if the MIME type is unknown or the input is invalid.
+///
+/// # Safety
+///
+/// `mime` must be a valid NUL-terminated C string, or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_known_format_from_mime(mime: *const c_char) -> c_uint {
+    if mime.is_null() {
+        return 0;
+    }
+    let Ok(s) = (unsafe { CStr::from_ptr(mime) }).to_str() else {
+        return 0;
+    };
+    KnownFormat::from_mime_type(s)
+        .map(format_to_c_uint)
+        .unwrap_or(0)
+}
+
+/// Resolve a filename extension (case-insensitive, no leading dot)
+/// to a known-format constant. Returns one of the `GLYCIN_NG_KFMT_*`
+/// values on success, or 0 if the extension is unknown or the input
+/// is invalid.
+///
+/// # Safety
+///
+/// `ext` must be a valid NUL-terminated C string, or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_known_format_from_extension(ext: *const c_char) -> c_uint {
+    if ext.is_null() {
+        return 0;
+    }
+    let Ok(s) = (unsafe { CStr::from_ptr(ext) }).to_str() else {
+        return 0;
+    };
+    KnownFormat::from_extension(s)
+        .map(format_to_c_uint)
+        .unwrap_or(0)
 }
 
 // ---------- Encoder ----------
