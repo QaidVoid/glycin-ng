@@ -34,7 +34,10 @@ use std::path::PathBuf;
 use std::ptr;
 use std::slice;
 
-use crate::{Error, Frame, Image, KnownFormat, Loader, MemoryFormat, SandboxSelector, Texture};
+use crate::{
+    EncodeFrame, Encoder, Error, Frame, Image, KnownFormat, Loader, MemoryFormat, SandboxSelector,
+    Texture,
+};
 
 /// Opaque [`Loader`] handle.
 #[repr(C)]
@@ -472,6 +475,35 @@ fn memory_format_to_c_uint(f: MemoryFormat) -> c_uint {
     }
 }
 
+fn c_uint_to_memory_format(value: c_uint) -> Option<MemoryFormat> {
+    Some(match value {
+        GLYCIN_NG_FORMAT_G8 => MemoryFormat::G8,
+        GLYCIN_NG_FORMAT_G8A8 => MemoryFormat::G8a8,
+        GLYCIN_NG_FORMAT_G8A8_PRE => MemoryFormat::G8a8Premultiplied,
+        GLYCIN_NG_FORMAT_G16 => MemoryFormat::G16,
+        GLYCIN_NG_FORMAT_G16A16 => MemoryFormat::G16a16,
+        GLYCIN_NG_FORMAT_G16A16_PRE => MemoryFormat::G16a16Premultiplied,
+        GLYCIN_NG_FORMAT_R8G8B8 => MemoryFormat::R8g8b8,
+        GLYCIN_NG_FORMAT_R8G8B8A8 => MemoryFormat::R8g8b8a8,
+        GLYCIN_NG_FORMAT_R8G8B8A8_PRE => MemoryFormat::R8g8b8a8Premultiplied,
+        GLYCIN_NG_FORMAT_B8G8R8 => MemoryFormat::B8g8r8,
+        GLYCIN_NG_FORMAT_B8G8R8A8 => MemoryFormat::B8g8r8a8,
+        GLYCIN_NG_FORMAT_B8G8R8A8_PRE => MemoryFormat::B8g8r8a8Premultiplied,
+        GLYCIN_NG_FORMAT_A8R8G8B8 => MemoryFormat::A8r8g8b8,
+        GLYCIN_NG_FORMAT_A8R8G8B8_PRE => MemoryFormat::A8r8g8b8Premultiplied,
+        GLYCIN_NG_FORMAT_A8B8G8R8 => MemoryFormat::A8b8g8r8,
+        GLYCIN_NG_FORMAT_R16G16B16 => MemoryFormat::R16g16b16,
+        GLYCIN_NG_FORMAT_R16G16B16A16 => MemoryFormat::R16g16b16a16,
+        GLYCIN_NG_FORMAT_R16G16B16A16_PRE => MemoryFormat::R16g16b16a16Premultiplied,
+        GLYCIN_NG_FORMAT_R16G16B16_F => MemoryFormat::R16g16b16Float,
+        GLYCIN_NG_FORMAT_R16G16B16A16_F => MemoryFormat::R16g16b16a16Float,
+        GLYCIN_NG_FORMAT_R32G32B32_F => MemoryFormat::R32g32b32Float,
+        GLYCIN_NG_FORMAT_R32G32B32A32_F => MemoryFormat::R32g32b32a32Float,
+        GLYCIN_NG_FORMAT_R32G32B32A32_F_PRE => MemoryFormat::R32g32b32a32FloatPremultiplied,
+        _ => return None,
+    })
+}
+
 /// Known-format constant: PNG / APNG.
 pub const GLYCIN_NG_KFMT_PNG: c_uint = 1;
 /// Known-format constant: JPEG.
@@ -498,6 +530,8 @@ pub const GLYCIN_NG_KFMT_PNM: c_uint = 11;
 pub const GLYCIN_NG_KFMT_DDS: c_uint = 12;
 /// Known-format constant: JPEG XL.
 pub const GLYCIN_NG_KFMT_JXL: c_uint = 13;
+/// Known-format constant: SVG.
+pub const GLYCIN_NG_KFMT_SVG: c_uint = 14;
 
 fn c_uint_to_format(value: c_uint) -> Option<KnownFormat> {
     Some(match value {
@@ -514,8 +548,346 @@ fn c_uint_to_format(value: c_uint) -> Option<KnownFormat> {
         GLYCIN_NG_KFMT_PNM => KnownFormat::Pnm,
         GLYCIN_NG_KFMT_DDS => KnownFormat::Dds,
         GLYCIN_NG_KFMT_JXL => KnownFormat::Jxl,
+        GLYCIN_NG_KFMT_SVG => KnownFormat::Svg,
         _ => return None,
     })
+}
+
+fn format_to_c_uint(f: KnownFormat) -> c_uint {
+    match f {
+        KnownFormat::Png => GLYCIN_NG_KFMT_PNG,
+        KnownFormat::Jpeg => GLYCIN_NG_KFMT_JPEG,
+        KnownFormat::Gif => GLYCIN_NG_KFMT_GIF,
+        KnownFormat::WebP => GLYCIN_NG_KFMT_WEBP,
+        KnownFormat::Tiff => GLYCIN_NG_KFMT_TIFF,
+        KnownFormat::Bmp => GLYCIN_NG_KFMT_BMP,
+        KnownFormat::Ico => GLYCIN_NG_KFMT_ICO,
+        KnownFormat::Tga => GLYCIN_NG_KFMT_TGA,
+        KnownFormat::Qoi => GLYCIN_NG_KFMT_QOI,
+        KnownFormat::Exr => GLYCIN_NG_KFMT_EXR,
+        KnownFormat::Pnm => GLYCIN_NG_KFMT_PNM,
+        KnownFormat::Dds => GLYCIN_NG_KFMT_DDS,
+        KnownFormat::Jxl => GLYCIN_NG_KFMT_JXL,
+        KnownFormat::Svg => GLYCIN_NG_KFMT_SVG,
+    }
+}
+
+/// Resolve an IANA media type (e.g. `"image/png"`) to a known-format
+/// constant. Returns one of the `GLYCIN_NG_KFMT_*` values on success,
+/// or 0 if the MIME type is unknown or the input is invalid.
+///
+/// # Safety
+///
+/// `mime` must be a valid NUL-terminated C string, or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_known_format_from_mime(mime: *const c_char) -> c_uint {
+    if mime.is_null() {
+        return 0;
+    }
+    let Ok(s) = (unsafe { CStr::from_ptr(mime) }).to_str() else {
+        return 0;
+    };
+    KnownFormat::from_mime_type(s)
+        .map(format_to_c_uint)
+        .unwrap_or(0)
+}
+
+/// Resolve a filename extension (case-insensitive, no leading dot)
+/// to a known-format constant. Returns one of the `GLYCIN_NG_KFMT_*`
+/// values on success, or 0 if the extension is unknown or the input
+/// is invalid.
+///
+/// # Safety
+///
+/// `ext` must be a valid NUL-terminated C string, or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_known_format_from_extension(ext: *const c_char) -> c_uint {
+    if ext.is_null() {
+        return 0;
+    }
+    let Ok(s) = (unsafe { CStr::from_ptr(ext) }).to_str() else {
+        return 0;
+    };
+    KnownFormat::from_extension(s)
+        .map(format_to_c_uint)
+        .unwrap_or(0)
+}
+
+// ---------- Encoder ----------
+
+/// Opaque [`Encoder`] handle. Created by [`glycin_ng_encoder_new`]
+/// and freed by [`glycin_ng_encoder_free`]. All `glycin_ng_encoder_*`
+/// setters mutate the encoder in place. [`glycin_ng_encoder_encode`]
+/// can be called multiple times on the same handle; the queued
+/// frames and configured options stay on the encoder until it is
+/// freed.
+#[repr(C)]
+pub struct GlycinNgEncoder {
+    inner: Encoder,
+}
+
+/// Opaque handle wrapping the bytes produced by
+/// [`glycin_ng_encoder_encode`]. The buffer is owned by the handle;
+/// release it with [`glycin_ng_encoded_image_free`].
+#[repr(C)]
+pub struct GlycinNgEncodedImage {
+    bytes: Vec<u8>,
+}
+
+/// Construct an encoder for `format`, which must be one of the
+/// `GLYCIN_NG_KFMT_*` constants. Returns NULL on error (unknown
+/// constant or no encoder compiled in for that target); see
+/// [`glycin_ng_last_error`] for the reason.
+#[unsafe(no_mangle)]
+pub extern "C" fn glycin_ng_encoder_new(format: c_uint) -> *mut GlycinNgEncoder {
+    clear_error();
+    let Some(target) = c_uint_to_format(format) else {
+        set_error("unknown known-format constant");
+        return ptr::null_mut();
+    };
+    match Encoder::new(target) {
+        Ok(enc) => Box::into_raw(Box::new(GlycinNgEncoder { inner: enc })),
+        Err(e) => {
+            set_error(e);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Free an encoder handle. Safe to call on NULL.
+///
+/// # Safety
+///
+/// `encoder` must have been returned by [`glycin_ng_encoder_new`]
+/// and must not have already been freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_encoder_free(encoder: *mut GlycinNgEncoder) {
+    if !encoder.is_null() {
+        drop(unsafe { Box::from_raw(encoder) });
+    }
+}
+
+/// Set the lossy quality (0..=100) for codecs that honor it (JPEG).
+/// Lossless codecs ignore the value.
+///
+/// # Safety
+///
+/// `encoder` must be a valid pointer returned by
+/// [`glycin_ng_encoder_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_encoder_set_quality(encoder: *mut GlycinNgEncoder, quality: u8) {
+    if let Some(handle) = unsafe { encoder.as_mut() } {
+        handle.inner.set_quality(quality);
+    }
+}
+
+/// Set the compression level. Retained on the encoder; current
+/// `image`-crate encoders ignore the value.
+///
+/// # Safety
+///
+/// `encoder` must be a valid pointer returned by
+/// [`glycin_ng_encoder_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_encoder_set_compression(
+    encoder: *mut GlycinNgEncoder,
+    compression: u8,
+) {
+    if let Some(handle) = unsafe { encoder.as_mut() } {
+        handle.inner.set_compression(compression);
+    }
+}
+
+/// Attach an ICC profile to the encoder. Pass `data = NULL` and
+/// `len = 0` to clear a previously-attached profile. Returns 0 on
+/// success, -1 on error.
+///
+/// # Safety
+///
+/// `encoder` must be a valid pointer returned by
+/// [`glycin_ng_encoder_new`]. `data` must point to at least `len`
+/// bytes, or both must be null/zero.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_encoder_set_icc_profile(
+    encoder: *mut GlycinNgEncoder,
+    data: *const u8,
+    len: usize,
+) -> c_int {
+    clear_error();
+    let Some(handle) = (unsafe { encoder.as_mut() }) else {
+        set_error("encoder is null");
+        return -1;
+    };
+    if data.is_null() && len != 0 {
+        set_error("icc data is null but len is non-zero");
+        return -1;
+    }
+    let icc = if data.is_null() || len == 0 {
+        None
+    } else {
+        Some(unsafe { slice::from_raw_parts(data, len) }.to_vec())
+    };
+    handle.inner.set_icc_profile(icc);
+    0
+}
+
+/// Attach a metadata key/value pair to the encoder. Both strings
+/// must be NUL-terminated and valid UTF-8. Returns 0 on success,
+/// -1 on error.
+///
+/// # Safety
+///
+/// `encoder` must be a valid pointer returned by
+/// [`glycin_ng_encoder_new`]. `key` and `value` must be valid
+/// NUL-terminated C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_encoder_add_metadata(
+    encoder: *mut GlycinNgEncoder,
+    key: *const c_char,
+    value: *const c_char,
+) -> c_int {
+    clear_error();
+    let Some(handle) = (unsafe { encoder.as_mut() }) else {
+        set_error("encoder is null");
+        return -1;
+    };
+    if key.is_null() || value.is_null() {
+        set_error("key or value is null");
+        return -1;
+    }
+    let k = match unsafe { CStr::from_ptr(key) }.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_error("metadata key is not valid UTF-8");
+            return -1;
+        }
+    };
+    let v = match unsafe { CStr::from_ptr(value) }.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            set_error("metadata value is not valid UTF-8");
+            return -1;
+        }
+    };
+    handle.inner.add_metadata(k, v);
+    0
+}
+
+/// Queue a frame for encoding. The bytes pointed to by `data` are
+/// copied; the caller may free `data` after the call returns.
+/// `format` must be one of the `GLYCIN_NG_FORMAT_*` constants.
+/// Returns 0 on success, -1 on error.
+///
+/// # Safety
+///
+/// `encoder` must be a valid pointer returned by
+/// [`glycin_ng_encoder_new`]. `data` must point to at least
+/// `data_len` bytes (or both may be null/zero, though such a frame
+/// will be rejected at encode time).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_encoder_add_frame(
+    encoder: *mut GlycinNgEncoder,
+    width: u32,
+    height: u32,
+    stride: u32,
+    format: c_uint,
+    data: *const u8,
+    data_len: usize,
+) -> c_int {
+    clear_error();
+    let Some(handle) = (unsafe { encoder.as_mut() }) else {
+        set_error("encoder is null");
+        return -1;
+    };
+    let Some(mf) = c_uint_to_memory_format(format) else {
+        set_error("unknown memory-format constant");
+        return -1;
+    };
+    if data.is_null() && data_len != 0 {
+        set_error("data is null but data_len is non-zero");
+        return -1;
+    }
+    let bytes: Vec<u8> = if data.is_null() || data_len == 0 {
+        Vec::new()
+    } else {
+        unsafe { slice::from_raw_parts(data, data_len) }.to_vec()
+    };
+    handle.inner.add_frame(EncodeFrame {
+        width,
+        height,
+        stride,
+        format: mf,
+        data: bytes,
+    });
+    0
+}
+
+/// Encode the queued frames into a new [`GlycinNgEncodedImage`].
+/// Returns NULL on error; see [`glycin_ng_last_error`].
+///
+/// # Safety
+///
+/// `encoder` must be a valid pointer returned by
+/// [`glycin_ng_encoder_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_encoder_encode(
+    encoder: *mut GlycinNgEncoder,
+) -> *mut GlycinNgEncodedImage {
+    clear_error();
+    let Some(handle) = (unsafe { encoder.as_mut() }) else {
+        set_error("encoder is null");
+        return ptr::null_mut();
+    };
+    match handle.inner.encode() {
+        Ok(bytes) => Box::into_raw(Box::new(GlycinNgEncodedImage { bytes })),
+        Err(e) => {
+            set_error(e);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Free an encoded-image handle. Safe to call on NULL.
+///
+/// # Safety
+///
+/// `image` must have been returned by [`glycin_ng_encoder_encode`]
+/// and must not have already been freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_encoded_image_free(image: *mut GlycinNgEncodedImage) {
+    if !image.is_null() {
+        drop(unsafe { Box::from_raw(image) });
+    }
+}
+
+/// Borrow the encoded bytes from the handle. The pointer is valid
+/// until the handle is freed. Returns NULL when `image` is NULL.
+///
+/// # Safety
+///
+/// `image` must be a valid pointer returned by
+/// [`glycin_ng_encoder_encode`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_encoded_image_data(
+    image: *const GlycinNgEncodedImage,
+) -> *const u8 {
+    unsafe { image.as_ref() }
+        .map(|i| i.bytes.as_ptr())
+        .unwrap_or(ptr::null())
+}
+
+/// Length in bytes of the encoded image. Returns 0 when `image` is
+/// NULL.
+///
+/// # Safety
+///
+/// `image` must be a valid pointer returned by
+/// [`glycin_ng_encoder_encode`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_encoded_image_len(image: *const GlycinNgEncodedImage) -> usize {
+    unsafe { image.as_ref() }
+        .map(|i| i.bytes.len())
+        .unwrap_or(0)
 }
 
 // Silence the unused-import warning when the Error variant is only

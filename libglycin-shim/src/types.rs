@@ -110,11 +110,9 @@ impl FrameRequestState {
 }
 
 /// State backing a `GlyCreator`. Wraps a [`glycin_ng::Encoder`]; the
-/// shim forwards every `gly_creator_*` C entry point to it. Lives
-/// behind an `Option` so `gly_creator_create` can `take()` the
-/// inner encoder (which consumes self on `encode`).
+/// shim forwards every `gly_creator_*` C entry point to it.
 pub(crate) struct CreatorState {
-    pub(crate) encoder: Mutex<Option<glycin_ng::Encoder>>,
+    pub(crate) encoder: Mutex<glycin_ng::Encoder>,
 }
 
 /// State backing a `GlyEncodedImage`.

@@ -122,6 +122,12 @@ impl Encoder {
 
     /// Encode the queued frames into a byte buffer.
     ///
+    /// Takes `&self` so callers can encode through a shared handle
+    /// without surrendering it (the C ABI and the shim's
+    /// `Mutex`-guarded creator state both need this). Frames stay
+    /// queued; call [`Encoder::clear_frames`] if you want to reuse
+    /// the encoder for another image.
+    ///
     /// Returns [`Error::Internal`] when no frames were added, or when
     /// more than one frame was queued (multi-frame animation encoding
     /// is not yet implemented; the C ABI in
@@ -129,7 +135,7 @@ impl Encoder {
     /// carry per-frame delay, so emitting an animation here would
     /// need to fabricate timing). Format-specific errors surface as
     /// [`Error::Encoder`].
-    pub fn encode(self) -> Result<Vec<u8>> {
+    pub fn encode(&self) -> Result<Vec<u8>> {
         if self.frames.is_empty() {
             return Err(Error::Internal("no frames queued for encode".into()));
         }
@@ -146,7 +152,15 @@ impl Encoder {
             frame.stride,
             frame.format,
         )?;
-        encode_dispatch(&self, &rgba, frame.width, frame.height)
+        encode_dispatch(self, &rgba, frame.width, frame.height)
+    }
+
+    /// Drop any frames previously added with [`Encoder::add_frame`].
+    /// Useful when reusing an encoder configuration across multiple
+    /// images.
+    pub fn clear_frames(&mut self) -> &mut Self {
+        self.frames.clear();
+        self
     }
 }
 
@@ -187,10 +201,6 @@ fn encode_dispatch(cfg: &Encoder, rgba: &[u8], width: u32, height: u32) -> Resul
             enc.write_image(rgba, width, height, ECT::Rgba8)
         }
         KnownFormat::Gif => {
-            // GifEncoder::encode borrows the writer for the single
-            // frame; multi-frame animation would use encode_frames
-            // with per-frame delays, which the public surface does
-            // not yet expose.
             let mut enc = image::codecs::gif::GifEncoder::new(&mut out);
             enc.encode(rgba, width, height, ECT::Rgba8)
         }
