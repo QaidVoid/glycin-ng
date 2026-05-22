@@ -27,11 +27,26 @@ unsafe extern "C" {
         strict: i32,
     ) -> i32;
     fn glycin_ng_loader_format_hint(loader: *mut GlycinNgLoader, format: c_uint) -> i32;
+    fn glycin_ng_loader_apply_transformations(loader: *mut GlycinNgLoader, apply: i32) -> i32;
+    fn glycin_ng_loader_render_size_hint(
+        loader: *mut GlycinNgLoader,
+        width: u32,
+        height: u32,
+    ) -> i32;
+    fn glycin_ng_loader_set_max_width(loader: *mut GlycinNgLoader, max_width: u32) -> i32;
+    fn glycin_ng_loader_set_max_height(loader: *mut GlycinNgLoader, max_height: u32) -> i32;
+    fn glycin_ng_loader_set_max_pixels(loader: *mut GlycinNgLoader, max_pixels: u64) -> i32;
+    fn glycin_ng_loader_set_max_frames(loader: *mut GlycinNgLoader, max_frames: u32) -> i32;
+    fn glycin_ng_loader_set_max_animation_seconds(loader: *mut GlycinNgLoader, secs: u64) -> i32;
+    fn glycin_ng_loader_set_decode_memory_mib(loader: *mut GlycinNgLoader, mib: u64) -> i32;
+    fn glycin_ng_loader_set_decode_cpu_seconds(loader: *mut GlycinNgLoader, secs: u64) -> i32;
     fn glycin_ng_loader_load(loader: *mut GlycinNgLoader) -> *mut GlycinNgImage;
     fn glycin_ng_image_free(image: *mut GlycinNgImage);
     fn glycin_ng_image_width(image: *const GlycinNgImage) -> u32;
     fn glycin_ng_image_height(image: *const GlycinNgImage) -> u32;
     fn glycin_ng_image_frame_count(image: *const GlycinNgImage) -> usize;
+    fn glycin_ng_image_is_animated(image: *const GlycinNgImage) -> i32;
+    fn glycin_ng_image_orientation(image: *const GlycinNgImage) -> u16;
     fn glycin_ng_image_format_name(image: *const GlycinNgImage) -> *const c_char;
     fn glycin_ng_image_texture(
         image: *const GlycinNgImage,
@@ -235,6 +250,87 @@ fn known_format_from_mime_recognises_common_types() {
     assert!(webp != 0 && webp != png && webp != jpeg);
     assert_eq!(bogus, 0);
     assert_eq!(null, 0);
+}
+
+#[test]
+fn loader_extras_apply_cleanly() {
+    let bytes = encode_rgba_png(4, 4);
+    let loader = unsafe { glycin_ng_loader_new_bytes(bytes.as_ptr(), bytes.len()) };
+    assert!(!loader.is_null());
+    assert_eq!(
+        unsafe { glycin_ng_loader_apply_transformations(loader, 0) },
+        0
+    );
+    assert_eq!(
+        unsafe { glycin_ng_loader_render_size_hint(loader, 16, 16) },
+        0
+    );
+    assert_eq!(unsafe { glycin_ng_loader_set_max_width(loader, 8192) }, 0);
+    assert_eq!(unsafe { glycin_ng_loader_set_max_height(loader, 8192) }, 0);
+    assert_eq!(
+        unsafe { glycin_ng_loader_set_max_pixels(loader, 1 << 20) },
+        0
+    );
+    assert_eq!(unsafe { glycin_ng_loader_set_max_frames(loader, 64) }, 0);
+    assert_eq!(
+        unsafe { glycin_ng_loader_set_max_animation_seconds(loader, 5) },
+        0
+    );
+    assert_eq!(
+        unsafe { glycin_ng_loader_set_decode_memory_mib(loader, 64) },
+        0
+    );
+    assert_eq!(
+        unsafe { glycin_ng_loader_set_decode_cpu_seconds(loader, 5) },
+        0
+    );
+    let image = unsafe { glycin_ng_loader_load(loader) };
+    assert!(!image.is_null());
+    unsafe { glycin_ng_image_free(image) };
+}
+
+#[test]
+fn loader_set_max_pixels_rejects_oversize_image() {
+    // 4x4 = 16 pixels; cap at 8 so the decoder rejects it.
+    let bytes = encode_rgba_png(4, 4);
+    let loader = unsafe { glycin_ng_loader_new_bytes(bytes.as_ptr(), bytes.len()) };
+    assert!(!loader.is_null());
+    assert_eq!(unsafe { glycin_ng_loader_set_max_pixels(loader, 8) }, 0);
+    let image = unsafe { glycin_ng_loader_load(loader) };
+    assert!(
+        image.is_null(),
+        "decode should fail on too-small max_pixels"
+    );
+    let err = unsafe { glycin_ng_last_error() };
+    assert!(!err.is_null());
+}
+
+#[test]
+fn loader_setters_reject_null_handle() {
+    assert_eq!(
+        unsafe { glycin_ng_loader_apply_transformations(ptr::null_mut(), 1) },
+        -1
+    );
+    assert_eq!(
+        unsafe { glycin_ng_loader_set_max_width(ptr::null_mut(), 1024) },
+        -1
+    );
+}
+
+#[test]
+fn image_orientation_defaults_to_identity_on_null() {
+    assert_eq!(unsafe { glycin_ng_image_orientation(ptr::null()) }, 1);
+}
+
+#[test]
+fn image_is_animated_defaults_to_false_on_still() {
+    let bytes = encode_rgba_png(4, 4);
+    let loader = unsafe { glycin_ng_loader_new_bytes(bytes.as_ptr(), bytes.len()) };
+    let image = unsafe { glycin_ng_loader_load(loader) };
+    assert!(!image.is_null());
+    assert_eq!(unsafe { glycin_ng_image_is_animated(image) }, 0);
+    assert_eq!(unsafe { glycin_ng_image_orientation(image) }, 1);
+    unsafe { glycin_ng_image_free(image) };
 }
 
 #[test]

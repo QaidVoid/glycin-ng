@@ -94,6 +94,14 @@ impl Loader {
         self
     }
 
+    /// Read back the [`Limits`] currently configured on this loader.
+    /// Useful when adjusting a single field without losing the rest;
+    /// callers can read, mutate, and pass the result to
+    /// [`Loader::limits`].
+    pub fn current_limits(&self) -> Limits {
+        self.limits
+    }
+
     /// Replace the sandbox selector for this decode.
     pub fn sandbox_selector(mut self, sandbox: SandboxSelector) -> Self {
         self.sandbox = sandbox;
