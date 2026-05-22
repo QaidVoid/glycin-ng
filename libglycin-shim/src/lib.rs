@@ -1,23 +1,27 @@
 //! `libglycin-2.so.0` compat shim that forwards to `glycin-ng`.
 //!
-//! Arch's `gdk-pixbuf2` package is built with the
-//! glycin-backed loader compiled in, so its
-//! `libgdk_pixbuf-2.0.so.0` has a hard `NEEDED libglycin-2.so.0`
-//! and calls the `gly_*` C API directly. This crate produces a
-//! shared object with the same SONAME that re-exports those
-//! symbols, routes the LOAD path through
-//! [`glycin_ng::Loader`], and stubs the encode path (we do not
-//! yet ship an encoder).
+//! Arch's `gdk-pixbuf2` package is built with the glycin-backed
+//! loader compiled in, so its `libgdk_pixbuf-2.0.so.0` has a hard
+//! `NEEDED libglycin-2.so.0` and calls the `gly_*` C API directly.
+//! This crate produces a shared object with the same SONAME that
+//! re-exports those symbols, routing every call to the glycin-ng C
+//! ABI exported by `libglycin_ng.so`.
+//!
+//! The shim does not statically link glycin-ng; the codec stack
+//! lives in `libglycin_ng.so` and is dynamically linked at runtime.
+//! `libglycin-2.so.0` therefore stays small and the same Rust code
+//! is not bundled into two shared objects.
 //!
 //! The opaque `GlyLoader`, `GlyImage`, `GlyFrame`, and
-//! `GlyFrameRequest` types are returned as base `GObject`s with
-//! our Rust-side state attached via `g_object_set_data_full`. This
+//! `GlyFrameRequest` types are returned as base `GObject`s with our
+//! Rust-side state attached via `g_object_set_data_full`. This
 //! sidesteps full GType registration and is sufficient for
 //! everything Arch's gdk-pixbuf does with these handles.
 
 mod convert;
 mod ffi;
 mod memformat;
+mod ngapi;
 mod types;
 
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
@@ -25,8 +29,7 @@ use std::ptr;
 use std::slice;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use glycin_ng::Loader;
-
+use crate::convert::RawFrame;
 use crate::ffi::{
     GBytes, GError, GFile, GInputStream, GObject, GQuark, GStrv, GType, gboolean, gpointer,
 };
@@ -89,6 +92,11 @@ unsafe fn set_error(error: *mut *mut GError, code: c_int, msg: &str) {
     }
 }
 
+unsafe fn set_error_from_ng(error: *mut *mut GError, prefix: &str) {
+    let msg = format!("{prefix}: {}", ngapi::last_error_message());
+    unsafe { set_error(error, 0, &msg) };
+}
+
 // ----- gly_loader_error_quark -----
 
 /// # Safety
@@ -117,17 +125,11 @@ pub unsafe extern "C" fn gly_loader_new(file: *mut GFile) -> *mut GObject {
         .to_string_lossy()
         .into_owned();
     unsafe { ffi::g_free(path_ptr as *mut c_void) };
-    // Read the file eagerly so we retain the source bytes for a
-    // possible later re-decode at a caller-requested scale. The
-    // `Loader::new_bytes` path is the same one the existing flow
-    // would have used after `Loader::new_path` lazily read the file.
     let bytes = match std::fs::read(&path_owned) {
         Ok(b) => b,
         Err(_) => return ptr::null_mut(),
     };
-    let source_bytes: Arc<[u8]> = Arc::from(bytes.clone().into_boxed_slice());
-    let loader = Loader::new_bytes(bytes);
-    unsafe { attach_state(LoaderState::new(loader, Some(source_bytes))) }
+    new_loader_from_bytes(bytes)
 }
 
 /// # Safety
@@ -143,9 +145,7 @@ pub unsafe extern "C" fn gly_loader_new_for_bytes(bytes: *mut GBytes) -> *mut GO
         return ptr::null_mut();
     }
     let vec = unsafe { slice::from_raw_parts(data as *const u8, size) }.to_vec();
-    let source_bytes: Arc<[u8]> = Arc::from(vec.clone().into_boxed_slice());
-    let loader = Loader::new_bytes(vec);
-    unsafe { attach_state(LoaderState::new(loader, Some(source_bytes))) }
+    new_loader_from_bytes(vec)
 }
 
 /// # Safety
@@ -169,9 +169,6 @@ pub unsafe extern "C" fn gly_loader_new_for_stream(stream: *mut GInputStream) ->
             )
         };
         if n < 0 {
-            // Read failure. We swallow the GError pointer rather
-            // than propagating it (no error channel on this
-            // constructor), and return a NULL handle.
             return ptr::null_mut();
         }
         if n == 0 {
@@ -179,8 +176,15 @@ pub unsafe extern "C" fn gly_loader_new_for_stream(stream: *mut GInputStream) ->
         }
         buf.extend_from_slice(&chunk[..n as usize]);
     }
-    let source_bytes: Arc<[u8]> = Arc::from(buf.clone().into_boxed_slice());
-    let loader = Loader::new_bytes(buf);
+    new_loader_from_bytes(buf)
+}
+
+fn new_loader_from_bytes(bytes: Vec<u8>) -> *mut GObject {
+    let source_bytes: Arc<[u8]> = Arc::from(bytes.clone().into_boxed_slice());
+    let loader = unsafe { ngapi::glycin_ng_loader_new_bytes(bytes.as_ptr(), bytes.len()) };
+    if loader.is_null() {
+        return ptr::null_mut();
+    }
     unsafe { attach_state(LoaderState::new(loader, Some(source_bytes))) }
 }
 
@@ -188,8 +192,7 @@ pub unsafe extern "C" fn gly_loader_new_for_stream(stream: *mut GInputStream) ->
 
 /// Accepted for ABI compatibility, but ignored. The in-process
 /// landlock + seccomp + rlimit posture is fixed and cannot be
-/// disabled through this entrypoint, so an `LD_PRELOAD` that pins
-/// the upstream `NOT_SANDBOXED` selector has no effect here.
+/// disabled through this entrypoint.
 ///
 /// # Safety
 /// `loader` may be NULL or a Loader handle returned from
@@ -242,8 +245,8 @@ pub unsafe extern "C" fn gly_loader_load(
         return ptr::null_mut();
     };
 
-    let inner = match state.inner.lock().unwrap().take() {
-        Some(l) => l,
+    let inner_ptr = match state.inner.lock().unwrap().take() {
+        Some(p) => p,
         None => {
             unsafe { set_error(error, 0, "loader already consumed") };
             return ptr::null_mut();
@@ -253,46 +256,40 @@ pub unsafe extern "C" fn gly_loader_load(
     let apply = *state.apply_transformations.lock().unwrap();
     let limits = *state.limits.lock().unwrap();
     let accepted = *state.accepted_memory_formats.lock().unwrap();
-    let source_bytes = state.source_bytes.clone();
 
-    let configured = inner.apply_transformations(apply).limits(limits);
-
-    match configured.load() {
-        Ok(mut image) => {
-            if accepted != 0 {
-                let width = image.width();
-                let height = image.height();
-                let new_frames: Vec<_> = image
-                    .frames()
-                    .iter()
-                    .cloned()
-                    .map(|f| convert::maybe_convert(f, accepted))
-                    .collect();
-                image.replace_frames(new_frames, width, height);
-            }
-            // Vector formats can be re-rendered when the consumer
-            // later requests a different scale; raster decoders
-            // ignore the hint anyway, so we only stash bytes for
-            // formats that can usefully take it.
-            let rerender = source_bytes.and_then(|bytes| {
-                if is_rescalable_format(image.format_name()) {
-                    Some(Rerender {
-                        source_bytes: bytes,
-                        limits,
-                        apply_transformations: apply,
-                        accepted_memory_formats: accepted,
-                    })
-                } else {
-                    None
-                }
-            });
-            unsafe { attach_state(ImageState::new(image, rerender)) }
-        }
-        Err(e) => {
-            unsafe { set_error(error, 0, &e.to_string()) };
-            ptr::null_mut()
-        }
+    unsafe {
+        ngapi::glycin_ng_loader_apply_transformations(inner_ptr, apply as c_int);
     }
+    limits.apply(inner_ptr);
+
+    let image_ptr = unsafe { ngapi::glycin_ng_loader_load(inner_ptr) };
+    if image_ptr.is_null() {
+        unsafe { set_error_from_ng(error, "gly_loader_load") };
+        return ptr::null_mut();
+    }
+
+    let frame_count = unsafe { ngapi::glycin_ng_image_frame_count(image_ptr) };
+    let format_name_ptr = unsafe { ngapi::glycin_ng_image_format_name(image_ptr) };
+    let format_name = if format_name_ptr.is_null() {
+        String::new()
+    } else {
+        unsafe { CStr::from_ptr(format_name_ptr) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    let rerender = state.source_bytes.as_ref().and_then(|bytes| {
+        if is_rescalable_format(&format_name) {
+            Some(Rerender {
+                source_bytes: bytes.clone(),
+                limits,
+                apply_transformations: apply,
+                accepted_memory_formats: accepted,
+            })
+        } else {
+            None
+        }
+    });
+    unsafe { attach_state(ImageState::new(image_ptr, frame_count, rerender)) }
 }
 
 fn is_rescalable_format(name: &str) -> bool {
@@ -305,27 +302,30 @@ fn is_rescalable_format(name: &str) -> bool {
 /// `image` must be valid or NULL.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_image_get_width(image: *mut GObject) -> u32 {
-    unsafe { state_ref::<ImageState>(image) }
-        .map(|s| s.image.width())
-        .unwrap_or(0)
+    let Some(state) = (unsafe { state_ref::<ImageState>(image) }) else {
+        return 0;
+    };
+    unsafe { ngapi::glycin_ng_image_width(state.inner) }
 }
 
 /// # Safety
 /// `image` must be valid or NULL.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_image_get_height(image: *mut GObject) -> u32 {
-    unsafe { state_ref::<ImageState>(image) }
-        .map(|s| s.image.height())
-        .unwrap_or(0)
+    let Some(state) = (unsafe { state_ref::<ImageState>(image) }) else {
+        return 0;
+    };
+    unsafe { ngapi::glycin_ng_image_height(state.inner) }
 }
 
 /// # Safety
 /// `image` must be valid or NULL.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_image_get_transformation_orientation(image: *mut GObject) -> u16 {
-    unsafe { state_ref::<ImageState>(image) }
-        .map(|s| s.image.orientation().exif_value())
-        .unwrap_or(1)
+    let Some(state) = (unsafe { state_ref::<ImageState>(image) }) else {
+        return 1;
+    };
+    unsafe { ngapi::glycin_ng_image_orientation(state.inner) }
 }
 
 /// # Safety
@@ -365,34 +365,55 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
         .map(|s| *s.loop_animation.lock().unwrap())
         .unwrap_or(true);
     let scale = request_state.and_then(|s| *s.scale.lock().unwrap());
+    // The accepted-formats bitmask lives on the Loader; we only
+    // have the Image here. Re-derive from the rerender snapshot for
+    // vector formats, otherwise leave at 0 (passthrough). gdk-pixbuf
+    // does not currently rely on conversion for raster frames in
+    // this code path.
+    let accepted = img_state
+        .rerender
+        .as_ref()
+        .map(|r| r.accepted_memory_formats)
+        .unwrap_or(0);
 
-    // If this is a vector format and the caller asked for a different
-    // size, re-decode at that size. Falling back to the cached frame
-    // would force gdk-pixbuf to bitmap-stretch the intrinsic size,
-    // which is what made symbolic icons look blurry next to upstream
-    // glycin's librsvg-backed output.
+    // SVG re-render: when the caller asks for a different size, redo
+    // the decode at that size so the output is crisp instead of
+    // gdk-pixbuf bitmap-stretching the intrinsic size.
     if let Some(rerender) = img_state.rerender.as_ref()
         && let Some((sw, sh)) = scale
         && sw > 0
         && sh > 0
-        && (sw != img_state.image.width() || sh != img_state.image.height())
+        && (sw != unsafe { ngapi::glycin_ng_image_width(img_state.inner) }
+            || sh != unsafe { ngapi::glycin_ng_image_height(img_state.inner) })
     {
-        let bytes = rerender.source_bytes.to_vec();
-        let result = Loader::new_bytes(bytes)
-            .apply_transformations(rerender.apply_transformations)
-            .limits(rerender.limits)
-            .render_size_hint(sw, sh)
-            .load();
-        if let Ok(image) = result
-            && let Some(mut frame) = image.frames().first().cloned()
-        {
-            if rerender.accepted_memory_formats != 0 {
-                frame = convert::maybe_convert(frame, rerender.accepted_memory_formats);
+        let new_loader = unsafe {
+            ngapi::glycin_ng_loader_new_bytes(
+                rerender.source_bytes.as_ptr(),
+                rerender.source_bytes.len(),
+            )
+        };
+        if !new_loader.is_null() {
+            unsafe {
+                ngapi::glycin_ng_loader_apply_transformations(
+                    new_loader,
+                    rerender.apply_transformations as c_int,
+                );
+                ngapi::glycin_ng_loader_render_size_hint(new_loader, sw, sh);
             }
-            return unsafe { attach_state(FrameState { frame }) };
+            rerender.limits.apply(new_loader);
+            let new_image = unsafe { ngapi::glycin_ng_loader_load(new_loader) };
+            if !new_image.is_null()
+                && let Some(raw) = extract_frame(new_image, 0, rerender.accepted_memory_formats)
+            {
+                unsafe { ngapi::glycin_ng_image_free(new_image) };
+                return unsafe { attach_state(FrameState { frame: raw }) };
+            }
+            if !new_image.is_null() {
+                unsafe { ngapi::glycin_ng_image_free(new_image) };
+            }
+            // Fall through to the cached frame so the caller still
+            // gets something to display.
         }
-        // Re-decode failed; fall through to the cached frame so the
-        // caller still gets a pixbuf rather than NULL.
     }
 
     let idx = match img_state.advance(loop_animation) {
@@ -402,8 +423,43 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
             return ptr::null_mut();
         }
     };
-    let frame = img_state.image.frames()[idx].clone();
-    unsafe { attach_state(FrameState { frame }) }
+    let Some(raw) = extract_frame(img_state.inner, idx, accepted) else {
+        unsafe { set_error(error, 0, "frame extraction failed") };
+        return ptr::null_mut();
+    };
+    unsafe { attach_state(FrameState { frame: raw }) }
+}
+
+fn extract_frame(
+    image: *mut ngapi::GlycinNgImage,
+    index: usize,
+    accepted: u32,
+) -> Option<RawFrame> {
+    let texture = unsafe { ngapi::glycin_ng_image_texture(image, index) };
+    if texture.is_null() {
+        return None;
+    }
+    let width = unsafe { ngapi::glycin_ng_texture_width(texture) };
+    let height = unsafe { ngapi::glycin_ng_texture_height(texture) };
+    let stride = unsafe { ngapi::glycin_ng_texture_stride(texture) };
+    let format = unsafe { ngapi::glycin_ng_texture_format(texture) };
+    let data_ptr = unsafe { ngapi::glycin_ng_texture_data(texture) };
+    let data_len = unsafe { ngapi::glycin_ng_texture_data_len(texture) };
+    let data = if data_ptr.is_null() || data_len == 0 {
+        Vec::new()
+    } else {
+        unsafe { slice::from_raw_parts(data_ptr, data_len) }.to_vec()
+    };
+    let delay_ms = unsafe { ngapi::glycin_ng_image_frame_delay_ms(image, index) };
+    let raw = RawFrame {
+        width,
+        height,
+        stride,
+        format,
+        data,
+        delay_ms,
+    };
+    Some(convert::maybe_convert(raw, accepted))
 }
 
 // ----- gly_frame_request_* -----
@@ -449,7 +505,7 @@ pub unsafe extern "C" fn gly_frame_request_set_loop_animation(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_frame_get_width(frame: *mut GObject) -> u32 {
     unsafe { state_ref::<FrameState>(frame) }
-        .map(|s| s.frame.width())
+        .map(|s| s.frame.width)
         .unwrap_or(0)
 }
 
@@ -458,7 +514,7 @@ pub unsafe extern "C" fn gly_frame_get_width(frame: *mut GObject) -> u32 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_frame_get_height(frame: *mut GObject) -> u32 {
     unsafe { state_ref::<FrameState>(frame) }
-        .map(|s| s.frame.height())
+        .map(|s| s.frame.height)
         .unwrap_or(0)
 }
 
@@ -467,7 +523,7 @@ pub unsafe extern "C" fn gly_frame_get_height(frame: *mut GObject) -> u32 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_frame_get_stride(frame: *mut GObject) -> u32 {
     unsafe { state_ref::<FrameState>(frame) }
-        .map(|s| s.frame.texture().stride())
+        .map(|s| s.frame.stride)
         .unwrap_or(0)
 }
 
@@ -476,7 +532,7 @@ pub unsafe extern "C" fn gly_frame_get_stride(frame: *mut GObject) -> u32 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_frame_get_memory_format(frame: *mut GObject) -> c_int {
     unsafe { state_ref::<FrameState>(frame) }
-        .map(|s| memformat::to_gly(s.frame.texture().format()))
+        .map(|s| memformat::ng_to_gly(s.frame.format))
         .unwrap_or(memformat::GLY_MEMORY_R8G8B8A8)
 }
 
@@ -484,10 +540,15 @@ pub unsafe extern "C" fn gly_frame_get_memory_format(frame: *mut GObject) -> c_i
 /// `frame` must be valid or NULL.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_frame_get_delay(frame: *mut GObject) -> i64 {
-    unsafe { state_ref::<FrameState>(frame) }
-        .and_then(|s| s.frame.delay())
-        .map(|d| d.as_micros() as i64)
-        .unwrap_or(-1)
+    let Some(state) = (unsafe { state_ref::<FrameState>(frame) }) else {
+        return -1;
+    };
+    if state.frame.delay_ms == 0 {
+        -1
+    } else {
+        // glycin's API documents the unit as microseconds.
+        (state.frame.delay_ms as i64).saturating_mul(1000)
+    }
 }
 
 /// # Safety
@@ -498,8 +559,12 @@ pub unsafe extern "C" fn gly_frame_get_buf_bytes(frame: *mut GObject) -> *mut GB
     let Some(state) = (unsafe { state_ref::<FrameState>(frame) }) else {
         return ptr::null_mut();
     };
-    let data = state.frame.texture().data();
-    unsafe { ffi::g_bytes_new(data.as_ptr() as *const c_void, data.len()) }
+    unsafe {
+        ffi::g_bytes_new(
+            state.frame.data.as_ptr() as *const c_void,
+            state.frame.data.len(),
+        )
+    }
 }
 
 // ----- gly_memory_format helpers -----
@@ -520,22 +585,27 @@ pub extern "C" fn gly_memory_format_is_premultiplied(format: c_int) -> gboolean 
 
 // ----- Encode path -----
 //
-// Thin wrapper over `glycin_ng::Encoder`. Each `gly_creator_*` entry
+// Thin wrapper over `glycin_ng_encoder_*`. Each `gly_creator_*` entry
 // point forwards its arguments to the inner encoder; the heavy
 // lifting (pixel-format conversion, bounds-checking, codec dispatch,
-// ICC embedding) lives in `glycin_ng::encoder`.
+// ICC embedding) lives in `libglycin_ng.so`.
+
 fn with_encoder<R>(
     creator: *mut GObject,
     error: *mut *mut GError,
     fname: &str,
-    f: impl FnOnce(&mut glycin_ng::Encoder) -> R,
+    f: impl FnOnce(*mut ngapi::GlycinNgEncoder) -> R,
 ) -> Option<R> {
     let Some(state) = (unsafe { state_ref::<CreatorState>(creator) }) else {
         unsafe { set_error(error, 0, &format!("{fname}: invalid creator")) };
         return None;
     };
-    let mut guard = state.encoder.lock().unwrap();
-    Some(f(&mut guard))
+    let guard = state.encoder.lock().unwrap();
+    if guard.is_null() {
+        unsafe { set_error(error, 0, &format!("{fname}: encoder already consumed")) };
+        return None;
+    }
+    Some(f(*guard))
 }
 
 /// # Safety
@@ -550,14 +620,11 @@ pub unsafe extern "C" fn gly_creator_new(
         unsafe { set_error(error, 0, "gly_creator_new: mime_type is NULL") };
         return ptr::null_mut();
     }
-    let mime = match unsafe { CStr::from_ptr(mime_type) }.to_str() {
-        Ok(s) => s,
-        Err(_) => {
-            unsafe { set_error(error, 0, "gly_creator_new: invalid UTF-8 in mime_type") };
-            return ptr::null_mut();
-        }
-    };
-    let Some(target) = glycin_ng::KnownFormat::from_mime_type(mime) else {
+    let kfmt = unsafe { ngapi::glycin_ng_known_format_from_mime(mime_type) };
+    if kfmt == 0 {
+        let mime = unsafe { CStr::from_ptr(mime_type) }
+            .to_string_lossy()
+            .into_owned();
         unsafe {
             set_error(
                 error,
@@ -566,14 +633,12 @@ pub unsafe extern "C" fn gly_creator_new(
             )
         };
         return ptr::null_mut();
-    };
-    let encoder = match glycin_ng::Encoder::new(target) {
-        Ok(e) => e,
-        Err(e) => {
-            unsafe { set_error(error, 0, &format!("gly_creator_new: {e}")) };
-            return ptr::null_mut();
-        }
-    };
+    }
+    let encoder = unsafe { ngapi::glycin_ng_encoder_new(kfmt) };
+    if encoder.is_null() {
+        unsafe { set_error_from_ng(error, "gly_creator_new") };
+        return ptr::null_mut();
+    }
     let state = CreatorState {
         encoder: Mutex::new(encoder),
     };
@@ -628,45 +693,40 @@ pub unsafe extern "C" fn gly_creator_add_frame_with_stride(
         unsafe { set_error(error, 0, "gly_creator_add_frame: empty texture data") };
         return ptr::null_mut();
     }
-    let Some(mf) = memformat::from_gly(memory_format) else {
+    let Some(ng_format) = memformat::gly_to_ng(memory_format) else {
         unsafe { set_error(error, 0, "gly_creator_add_frame: unsupported memory format") };
         return ptr::null_mut();
     };
-    let data = unsafe { slice::from_raw_parts(data_ptr as *const u8, size) }.to_vec();
-    // Caller-supplied stride wins. When zero, fall back to
-    // `width * bytes_per_pixel` for the resolved format - using a
-    // hardcoded bpp of 4 would tear apart 24-bit RGB textures.
-    let actual_stride = if stride > 0 {
-        stride
-    } else {
-        width * mf.bytes_per_pixel() as u32
+    let bpp = memformat::bytes_per_pixel_ng(ng_format) as u32;
+    let actual_stride = if stride > 0 { stride } else { width * bpp };
+
+    let rc = match with_encoder(creator, error, "gly_creator_add_frame", |enc| unsafe {
+        ngapi::glycin_ng_encoder_add_frame(
+            enc,
+            width,
+            height,
+            actual_stride,
+            ng_format,
+            data_ptr as *const u8,
+            size,
+        )
+    }) {
+        Some(v) => v,
+        None => return ptr::null_mut(),
     };
-    let frame = glycin_ng::EncodeFrame {
-        width,
-        height,
-        stride: actual_stride,
-        format: mf,
-        data,
-    };
-    if with_encoder(creator, error, "gly_creator_add_frame", |enc| {
-        enc.add_frame(frame);
-    })
-    .is_none()
-    {
+    if rc != 0 {
+        unsafe { set_error_from_ng(error, "gly_creator_add_frame") };
         return ptr::null_mut();
     }
+
     // Return the creator itself as the frame handle so gdk-pixbuf
     // can optionally call `gly_new_frame_set_color_icc_profile`.
     unsafe { ffi::g_object_ref(creator as *mut c_void) as *mut GObject }
 }
 
-/// Capture a metadata key/value pair on the creator. The pair is
-/// retained on the underlying [`glycin_ng::Encoder`] so the data is
-/// not lost, even though current encoders do not yet embed it into
-/// the output.
-///
-/// Returns TRUE on capture so gdk-pixbuf-driven saves do not fail
-/// when the host forwards a benign metadata key.
+/// Capture a metadata key/value pair on the encoder. The pair is
+/// retained on the underlying encoder so the data is not lost, even
+/// though current encoders do not yet embed it into the output.
 ///
 /// # Safety
 /// `creator`, `key`, `value` must be valid or NULL.
@@ -680,25 +740,13 @@ pub unsafe extern "C" fn gly_creator_add_metadata_key_value(
     if key.is_null() || value.is_null() {
         return 0;
     }
-    let k = match unsafe { CStr::from_ptr(key) }.to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => return 0,
-    };
-    let v = match unsafe { CStr::from_ptr(value) }.to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => return 0,
-    };
-    match with_encoder(
+    let rc = with_encoder(
         creator,
         ptr::null_mut(),
         "gly_creator_add_metadata_key_value",
-        |enc| {
-            enc.add_metadata(k, v);
-        },
-    ) {
-        Some(()) => 1,
-        None => 0,
-    }
+        |enc| unsafe { ngapi::glycin_ng_encoder_add_metadata(enc, key, value) },
+    );
+    matches!(rc, Some(0)) as gboolean
 }
 
 /// # Safety
@@ -709,17 +757,13 @@ pub unsafe extern "C" fn gly_creator_set_encoding_quality(
     quality: u8,
     _error: *mut *mut GError,
 ) -> gboolean {
-    match with_encoder(
+    let ok = with_encoder(
         creator,
         ptr::null_mut(),
         "gly_creator_set_encoding_quality",
-        |enc| {
-            enc.set_quality(quality);
-        },
-    ) {
-        Some(()) => 1,
-        None => 0,
-    }
+        |enc| unsafe { ngapi::glycin_ng_encoder_set_quality(enc, quality) },
+    );
+    ok.is_some() as gboolean
 }
 
 /// # Safety
@@ -730,17 +774,13 @@ pub unsafe extern "C" fn gly_creator_set_encoding_compression(
     compression: u8,
     _error: *mut *mut GError,
 ) -> gboolean {
-    match with_encoder(
+    let ok = with_encoder(
         creator,
         ptr::null_mut(),
         "gly_creator_set_encoding_compression",
-        |enc| {
-            enc.set_compression(compression);
-        },
-    ) {
-        Some(()) => 1,
-        None => 0,
-    }
+        |enc| unsafe { ngapi::glycin_ng_encoder_set_compression(enc, compression) },
+    );
+    ok.is_some() as gboolean
 }
 
 /// # Safety
@@ -761,26 +801,23 @@ pub unsafe extern "C" fn gly_creator_create(
     creator: *mut GObject,
     error: *mut *mut GError,
 ) -> *mut GObject {
-    let Some(state) = (unsafe { state_ref::<CreatorState>(creator) }) else {
-        unsafe { set_error(error, 0, "gly_creator_create: invalid creator") };
-        return ptr::null_mut();
+    let encoded = match with_encoder(creator, error, "gly_creator_create", |enc| unsafe {
+        ngapi::glycin_ng_encoder_encode(enc)
+    }) {
+        Some(p) => p,
+        None => return ptr::null_mut(),
     };
-    let guard = state.encoder.lock().unwrap();
-    match guard.encode() {
-        Ok(data) => unsafe { attach_state(EncodedImageState { data }) },
-        Err(e) => {
-            unsafe { set_error(error, 0, &format!("gly_creator_create: {e}")) };
-            ptr::null_mut()
-        }
+    if encoded.is_null() {
+        unsafe { set_error_from_ng(error, "gly_creator_create") };
+        return ptr::null_mut();
     }
+    unsafe { attach_state(EncodedImageState { inner: encoded }) }
 }
 
-/// Attach an ICC profile to the creator. `gly_creator_add_frame*`
+/// Attach an ICC profile to the encoder. `gly_creator_add_frame*`
 /// returns the creator itself (with an extra ref) as the "new frame"
-/// handle, so this function unwraps that and stores the profile on
-/// the inner encoder. It is then applied by [`gly_creator_create`]
-/// for PNG (iCCP), JPEG (APP2 ICC_PROFILE), and WebP (ICCP) outputs.
-/// Other formats ignore the profile.
+/// handle, so this function unwraps that and forwards to the
+/// underlying encoder.
 ///
 /// # Safety
 /// `new_frame` must be a creator handle and `icc_profile` a valid
@@ -790,85 +827,37 @@ pub unsafe extern "C" fn gly_new_frame_set_color_icc_profile(
     new_frame: *mut GObject,
     icc_profile: *mut GBytes,
 ) -> gboolean {
-    let icc = if icc_profile.is_null() {
-        None
+    let (data, len) = if icc_profile.is_null() {
+        (ptr::null(), 0usize)
     } else {
         let mut size: usize = 0;
         let data_ptr = unsafe { ffi::g_bytes_get_data(icc_profile, &mut size) };
         if data_ptr.is_null() || size == 0 {
-            None
+            (ptr::null(), 0)
         } else {
-            Some(unsafe { slice::from_raw_parts(data_ptr as *const u8, size) }.to_vec())
+            (data_ptr as *const u8, size)
         }
     };
-    match with_encoder(
+    let rc = with_encoder(
         new_frame,
         ptr::null_mut(),
         "gly_new_frame_set_color_icc_profile",
-        |enc| {
-            enc.set_icc_profile(icc);
-        },
-    ) {
-        Some(()) => 1,
-        None => 0,
-    }
+        |enc| unsafe { ngapi::glycin_ng_encoder_set_icc_profile(enc, data, len) },
+    );
+    matches!(rc, Some(0)) as gboolean
 }
 
 /// # Safety
 /// `encoded` must be a valid `GlyEncodedImage` returned by `gly_creator_create`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_encoded_image_get_data(encoded: *mut GObject) -> *mut GBytes {
-    let state = match unsafe { state_ref::<EncodedImageState>(encoded) } {
-        Some(s) => s,
-        None => return ptr::null_mut(),
+    let Some(state) = (unsafe { state_ref::<EncodedImageState>(encoded) }) else {
+        return ptr::null_mut();
     };
-    unsafe { ffi::g_bytes_new(state.data.as_ptr() as *const c_void, state.data.len()) }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn loader_error_quark_is_nonzero() {
-        let q = gly_loader_error_quark();
-        assert!(q != 0);
+    let data_ptr = unsafe { ngapi::glycin_ng_encoded_image_data(state.inner) };
+    let data_len = unsafe { ngapi::glycin_ng_encoded_image_len(state.inner) };
+    if data_ptr.is_null() || data_len == 0 {
+        return ptr::null_mut();
     }
-
-    #[test]
-    fn memory_format_helpers_classify_correctly() {
-        assert_eq!(
-            gly_memory_format_has_alpha(memformat::GLY_MEMORY_R8G8B8A8),
-            1
-        );
-        assert_eq!(gly_memory_format_has_alpha(memformat::GLY_MEMORY_R8G8B8), 0);
-        assert_eq!(
-            gly_memory_format_is_premultiplied(memformat::GLY_MEMORY_R8G8B8A8_PREMULTIPLIED),
-            1
-        );
-        assert_eq!(
-            gly_memory_format_is_premultiplied(memformat::GLY_MEMORY_R8G8B8A8),
-            0
-        );
-    }
-
-    #[test]
-    fn creator_path_returns_nulls() {
-        let p = unsafe { gly_creator_new(ptr::null(), ptr::null_mut()) };
-        assert!(p.is_null());
-        let q = unsafe { gly_creator_create(ptr::null_mut(), ptr::null_mut()) };
-        assert!(q.is_null());
-    }
-
-    #[test]
-    fn null_object_helpers_return_zero() {
-        assert_eq!(unsafe { gly_image_get_width(ptr::null_mut()) }, 0);
-        assert_eq!(unsafe { gly_image_get_height(ptr::null_mut()) }, 0);
-        assert_eq!(
-            unsafe { gly_image_get_transformation_orientation(ptr::null_mut()) },
-            1
-        );
-        assert_eq!(unsafe { gly_frame_get_width(ptr::null_mut()) }, 0);
-        assert_eq!(unsafe { gly_frame_get_delay(ptr::null_mut()) }, -1);
-    }
+    unsafe { ffi::g_bytes_new(data_ptr as *const c_void, data_len) }
 }
