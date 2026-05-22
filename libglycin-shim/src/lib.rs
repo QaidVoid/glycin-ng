@@ -535,11 +535,7 @@ fn with_encoder<R>(
         return None;
     };
     let mut guard = state.encoder.lock().unwrap();
-    let Some(enc) = guard.as_mut() else {
-        unsafe { set_error(error, 0, &format!("{fname}: encoder already consumed")) };
-        return None;
-    };
-    Some(f(enc))
+    Some(f(&mut guard))
 }
 
 /// # Safety
@@ -579,7 +575,7 @@ pub unsafe extern "C" fn gly_creator_new(
         }
     };
     let state = CreatorState {
-        encoder: Mutex::new(Some(encoder)),
+        encoder: Mutex::new(encoder),
     };
     unsafe { attach_state(state) }
 }
@@ -769,11 +765,8 @@ pub unsafe extern "C" fn gly_creator_create(
         unsafe { set_error(error, 0, "gly_creator_create: invalid creator") };
         return ptr::null_mut();
     };
-    let Some(encoder) = state.encoder.lock().unwrap().take() else {
-        unsafe { set_error(error, 0, "gly_creator_create: encoder already consumed") };
-        return ptr::null_mut();
-    };
-    match encoder.encode() {
+    let guard = state.encoder.lock().unwrap();
+    match guard.encode() {
         Ok(data) => unsafe { attach_state(EncodedImageState { data }) },
         Err(e) => {
             unsafe { set_error(error, 0, &format!("gly_creator_create: {e}")) };
