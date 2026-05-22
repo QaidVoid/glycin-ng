@@ -15,3 +15,10 @@ path = "src/lib.rs"
 [dependencies]
 bitflags = "2.11.1"
 libc = "0.2"
+
+# Build-only dep so Cargo schedules the cdylib build before this
+# crate links. No symbols are statically pulled in; the resulting
+# `libglycin_ng.so` is resolved dynamically via the link directives
+# in `build.rs`.
+[build-dependencies.glycin-ng-c]
+path = "../c-api"

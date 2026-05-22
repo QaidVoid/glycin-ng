@@ -10,7 +10,7 @@ keywords = ["decoder", "image", "landlock", "sandbox", "seccomp"]
 categories = ["encoding", "multimedia::images"]
 
 [workspace]
-members = [".", "libglycin-shim", "pixbuf-loader"]
+members = [".", "c-api", "libglycin-shim", "pixbuf-loader"]
 
 [workspace.package]
 version = "0.1.0"
@@ -19,7 +19,7 @@ rust-version = "1.87"
 license = "MIT OR Apache-2.0"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 name = "glycin_ng"
 path = "src/lib.rs"
 
