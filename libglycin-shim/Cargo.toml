@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "libglycin-2.so.0 compat shim that forwards to glycin-ng"
+description = "libglycin-2.so.0 compat shim that forwards to libglycin_ng.so"
 publish = false
 
 [lib]
@@ -16,27 +16,9 @@ path = "src/lib.rs"
 bitflags = "2.11.1"
 libc = "0.2"
 
-[dependencies.glycin-ng]
-path = ".."
-default-features = false
-features = [
-  "bmp",
-  "dds",
-  "decode",
-  "encode",
-  "exr",
-  "gif",
-  "ico",
-  "jpeg",
-  "jxl",
-  "landlock",
-  "metadata",
-  "png",
-  "pnm",
-  "qoi",
-  "seccomp",
-  "svg",
-  "tga",
-  "tiff",
-  "webp",
-]
+# Build-only dep so Cargo schedules the cdylib build before this
+# crate links. No symbols are statically pulled in; the resulting
+# `libglycin_ng.so` is resolved dynamically via the link directives
+# in `build.rs`.
+[build-dependencies.glycin-ng-c]
+path = "../c-api"
