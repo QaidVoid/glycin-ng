@@ -17,13 +17,22 @@ sha256sums=('SKIP')
 
 build() {
   cd "$srcdir"/"$pkgname"
-  cargo build --release
+  cargo build --release -p glycin-ng-c
   cargo build --release -p glycin-ng-libglycin-shim
 }
 
 package() {
   cd "$srcdir"/"$pkgname"
-  install -Dm755 ./target/release/libglycin_ng.so "$pkgdir"/usr/lib/libglycin_ng.so
-  install -Dm755 ./target/release/libglycin_2.so "$pkgdir"/usr/lib/libglycin-2.so.0
-}
+  install -Dm755 ./target/release/libglycin_ng.so \
+    "$pkgdir"/usr/lib/libglycin_ng.so
+  install -Dm755 ./target/release/libglycin_2.so \
+    "$pkgdir"/usr/lib/libglycin-2.so.0
+  install -Dm644 ./include/glycin_ng.h \
+    "$pkgdir"/usr/include/glycin_ng.h
 
+  install -d "$pkgdir"/usr/lib/pkgconfig
+  sed -e "s|@PREFIX@|/usr|g" \
+      -e "s|@VERSION@|$pkgver|g" \
+    ./pkgconfig/glycin-ng.pc.in \
+    > "$pkgdir"/usr/lib/pkgconfig/glycin-ng.pc
+}
