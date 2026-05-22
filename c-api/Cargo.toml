@@ -3,15 +3,11 @@ name = "glycin-ng-c"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
 description = "cdylib build of glycin-ng exporting only the C ABI"
+license.workspace = true
 publish = false
 
 [lib]
-# cdylib only. Adding rlib here would re-bloat the cdylib because
-# rustc would keep every transitive pub Rust symbol as a candidate
-# for static linking by an rlib consumer, defeating the whole point
-# of splitting this package out.
 crate-type = ["cdylib"]
 name = "glycin_ng"
 path = "src/lib.rs"

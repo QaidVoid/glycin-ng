@@ -1,7 +1,7 @@
 # Maintainer: Samueru-sama xdglawyer@outlook.com
 
 pkgname=glycin-ng
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="In-process image decoder without bwrap dependency or useless bloat"
 arch=('x86_64' 'aarch64')
@@ -28,11 +28,18 @@ package() {
   install -Dm755 ./target/release/libglycin_2.so \
     "$pkgdir"/usr/lib/libglycin-2.so.0
   install -Dm644 ./include/glycin_ng.h \
-    "$pkgdir"/usr/include/glycin_ng.h
+    "$pkgdir"/usr/include/glycin-ng/glycin_ng.h
 
   install -d "$pkgdir"/usr/lib/pkgconfig
   sed -e "s|@PREFIX@|/usr|g" \
       -e "s|@VERSION@|$pkgver|g" \
+      -e "s|@PROJECT_NAME@|glycin-ng|g" \
     ./pkgconfig/glycin-ng.pc.in \
     > "$pkgdir"/usr/lib/pkgconfig/glycin-ng.pc
+
+  sed -e "s|@PREFIX@|/usr|g" \
+      -e "s|@VERSION@|2.1.1|g" \
+      -e "s|@PROJECT_NAME@|glycin-2|g" \
+    ./pkgconfig/glycin-ng.pc.in \
+    > "$pkgdir"/usr/lib/pkgconfig/glycin-2.pc
 }

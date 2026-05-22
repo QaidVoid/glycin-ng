@@ -3,9 +3,9 @@ name = "glycin-ng"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
 description = "Permissively-licensed Rust image decoder library with in-process sandboxing"
 repository = "https://github.com/QaidVoid/glycin-ng"
+license.workspace = true
 keywords = ["decoder", "image", "landlock", "sandbox", "seccomp"]
 categories = ["encoding", "multimedia::images"]
 
@@ -13,7 +13,7 @@ categories = ["encoding", "multimedia::images"]
 members = [".", "c-api", "libglycin-shim", "pixbuf-loader"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.87"
 license = "MIT OR Apache-2.0"
@@ -137,7 +137,7 @@ jxl = ["dep:jxl-oxide"]
 png = ["dep:png"]
 pnm = ["dep:image"]
 qoi = ["dep:qoi"]
-svg = ["dep:resvg", "dep:base64", "dep:quick-xml"]
+svg = ["dep:base64", "dep:quick-xml", "dep:resvg"]
 tga = ["dep:image"]
 tiff = ["dep:tiff"]
 webp = ["dep:image-webp"]

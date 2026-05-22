@@ -8,4 +8,4 @@ Description: Permissively-licensed Rust image decoder library with in-process sa
 Version: @VERSION@
 URL: https://github.com/QaidVoid/glycin-ng
 Libs: -L${libdir} -lglycin_ng
-Cflags: -I${includedir}
+Cflags: -I${includedir}/@PROJECT_NAME@

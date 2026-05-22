@@ -1,4 +1,21 @@
 
+## 0.2.0 — 2026-05-22
+
+### Documentation
+
+- Add badges
+
+### Features
+
+- **c-api:** Extend header, add pkg-config, add header-drift test (#5)
+- **c-api:** Expose loader extras and image orientation (#4)
+- **c-api:** Expose the image encoder (#2)
+- Implement image encoding and ship `PKGBUILD`
+
+### Refactor
+
+- **shim:** Link against libglycin_ng.so via the C ABI (#6)
+
 ## 0.1.0 — 2026-05-21
 
 ### Bug Fixes
