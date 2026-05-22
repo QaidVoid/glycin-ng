@@ -759,6 +759,21 @@ pub unsafe extern "C" fn gly_creator_create(
         unsafe { set_error(error, 0, "gly_creator_create: no frames to encode") };
         return ptr::null_mut();
     };
+    // Multi-frame encode is not yet wired in: the C ABI has no
+    // per-frame delay parameter, so emitting an animation would need
+    // a fabricated cadence. Surface the limit explicitly so callers
+    // do not get a single-frame "still" silently when they queued an
+    // animation.
+    if frames.len() > 1 {
+        unsafe {
+            set_error(
+                error,
+                0,
+                "gly_creator_create: multi-frame encoding is not yet supported",
+            )
+        };
+        return ptr::null_mut();
+    }
     let mf = match memformat::from_gly(frame.memory_format) {
         Some(f) => f,
         None => {
