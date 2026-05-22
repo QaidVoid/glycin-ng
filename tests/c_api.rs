@@ -9,7 +9,8 @@ use std::ffi::{CStr, c_char, c_uint};
 use std::ptr;
 
 use glycin_ng::c_api::{
-    GLYCIN_NG_FORMAT_R8G8B8A8, GLYCIN_NG_KFMT_PNG, GlycinNgImage, GlycinNgLoader,
+    GLYCIN_NG_FORMAT_R8G8B8A8, GLYCIN_NG_KFMT_PNG, GlycinNgEncodedImage, GlycinNgEncoder,
+    GlycinNgImage, GlycinNgLoader,
 };
 
 #[allow(improper_ctypes)]
@@ -41,6 +42,23 @@ unsafe extern "C" {
     fn glycin_ng_texture_format(texture: *const glycin_ng::Texture) -> c_uint;
     fn glycin_ng_texture_data(texture: *const glycin_ng::Texture) -> *const u8;
     fn glycin_ng_texture_data_len(texture: *const glycin_ng::Texture) -> usize;
+    fn glycin_ng_encoder_new(format: c_uint) -> *mut GlycinNgEncoder;
+    fn glycin_ng_encoder_free(encoder: *mut GlycinNgEncoder);
+    fn glycin_ng_encoder_add_frame(
+        encoder: *mut GlycinNgEncoder,
+        width: u32,
+        height: u32,
+        stride: u32,
+        format: c_uint,
+        data: *const u8,
+        data_len: usize,
+    ) -> i32;
+    fn glycin_ng_encoder_encode(encoder: *mut GlycinNgEncoder) -> *mut GlycinNgEncodedImage;
+    fn glycin_ng_encoded_image_free(image: *mut GlycinNgEncodedImage);
+    fn glycin_ng_encoded_image_data(image: *const GlycinNgEncodedImage) -> *const u8;
+    fn glycin_ng_encoded_image_len(image: *const GlycinNgEncodedImage) -> usize;
+    fn glycin_ng_known_format_from_mime(mime: *const c_char) -> c_uint;
+    fn glycin_ng_known_format_from_extension(ext: *const c_char) -> c_uint;
 }
 
 fn encode_rgba_png(width: u32, height: u32) -> Vec<u8> {
@@ -135,4 +153,100 @@ fn loader_new_path_handles_invalid_path() {
     assert!(!loader.is_null());
     let image = unsafe { glycin_ng_loader_load(loader) };
     assert!(image.is_null());
+}
+
+#[cfg(feature = "encode")]
+#[test]
+fn encoder_round_trip_png_through_c_api() {
+    // Authored pixels: 2x2 RGBA8 with four distinct colors so we can
+    // verify ordering survives encode + decode.
+    let width: u32 = 2;
+    let height: u32 = 2;
+    let pixels: [u8; 16] = [
+        255, 0, 0, 255, // red
+        0, 255, 0, 255, // green
+        0, 0, 255, 255, // blue
+        255, 255, 0, 255, // yellow
+    ];
+
+    let enc = unsafe { glycin_ng_encoder_new(GLYCIN_NG_KFMT_PNG) };
+    assert!(!enc.is_null(), "encoder_new returned NULL");
+
+    let rc = unsafe {
+        glycin_ng_encoder_add_frame(
+            enc,
+            width,
+            height,
+            width * 4,
+            GLYCIN_NG_FORMAT_R8G8B8A8,
+            pixels.as_ptr(),
+            pixels.len(),
+        )
+    };
+    assert_eq!(rc, 0, "add_frame failed");
+
+    let encoded = unsafe { glycin_ng_encoder_encode(enc) };
+    assert!(!encoded.is_null(), "encode returned NULL");
+
+    let out_ptr = unsafe { glycin_ng_encoded_image_data(encoded) };
+    let out_len = unsafe { glycin_ng_encoded_image_len(encoded) };
+    assert!(!out_ptr.is_null());
+    assert!(out_len > 0);
+    let out = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+    assert!(out.starts_with(b"\x89PNG"), "output is not a PNG");
+
+    // Decode the encoded bytes back through the C loader and confirm
+    // pixel parity.
+    let loader = unsafe { glycin_ng_loader_new_bytes(out.as_ptr(), out.len()) };
+    assert!(!loader.is_null());
+    let image = unsafe { glycin_ng_loader_load(loader) };
+    assert!(!image.is_null(), "decode of encoded PNG failed");
+    assert_eq!(unsafe { glycin_ng_image_width(image) }, width);
+    assert_eq!(unsafe { glycin_ng_image_height(image) }, height);
+
+    let tex = unsafe { glycin_ng_image_texture(image, 0) };
+    let tlen = unsafe { glycin_ng_texture_data_len(tex) };
+    let tdata = unsafe { glycin_ng_texture_data(tex) };
+    let decoded = unsafe { std::slice::from_raw_parts(tdata, tlen) };
+    assert_eq!(decoded, &pixels[..]);
+
+    unsafe { glycin_ng_image_free(image) };
+    unsafe { glycin_ng_encoded_image_free(encoded) };
+    unsafe { glycin_ng_encoder_free(enc) };
+}
+
+#[test]
+fn encoder_new_rejects_unknown_format_constant() {
+    let enc = unsafe { glycin_ng_encoder_new(99999) };
+    assert!(enc.is_null());
+    let err = unsafe { glycin_ng_last_error() };
+    assert!(!err.is_null());
+}
+
+#[test]
+fn known_format_from_mime_recognises_common_types() {
+    let png = unsafe { glycin_ng_known_format_from_mime(c"image/png".as_ptr()) };
+    let jpeg = unsafe { glycin_ng_known_format_from_mime(c"image/jpeg".as_ptr()) };
+    let webp = unsafe { glycin_ng_known_format_from_mime(c"image/webp".as_ptr()) };
+    let bogus = unsafe { glycin_ng_known_format_from_mime(c"image/not-a-real-format".as_ptr()) };
+    let null = unsafe { glycin_ng_known_format_from_mime(ptr::null()) };
+    assert_eq!(png, GLYCIN_NG_KFMT_PNG);
+    assert!(jpeg != 0 && jpeg != png);
+    assert!(webp != 0 && webp != png && webp != jpeg);
+    assert_eq!(bogus, 0);
+    assert_eq!(null, 0);
+}
+
+#[test]
+fn known_format_from_extension_handles_aliases() {
+    let png_lower = unsafe { glycin_ng_known_format_from_extension(c"png".as_ptr()) };
+    let png_upper = unsafe { glycin_ng_known_format_from_extension(c"PNG".as_ptr()) };
+    let jpg = unsafe { glycin_ng_known_format_from_extension(c"jpg".as_ptr()) };
+    let jpeg = unsafe { glycin_ng_known_format_from_extension(c"jpeg".as_ptr()) };
+    let bogus = unsafe { glycin_ng_known_format_from_extension(c"xyz123".as_ptr()) };
+    assert_eq!(png_lower, GLYCIN_NG_KFMT_PNG);
+    assert_eq!(png_upper, GLYCIN_NG_KFMT_PNG);
+    assert_eq!(jpg, jpeg);
+    assert!(jpeg != 0);
+    assert_eq!(bogus, 0);
 }
