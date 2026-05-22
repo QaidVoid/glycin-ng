@@ -111,7 +111,15 @@ default = [
 ]
 
 decode = []
-encode = []
+encode = [
+  "dep:image",
+  "image/bmp",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/tiff",
+  "image/webp",
+]
 metadata = []
 
 landlock = ["dep:landlock"]

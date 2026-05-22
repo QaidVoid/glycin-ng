@@ -1,0 +1,29 @@
+# Maintainer: Samueru-sama xdglawyer@outlook.com
+
+pkgname=glycin-ng
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="In-process image decoder without bwrap dependency or useless bloat"
+arch=('x86_64' 'aarch64')
+url=https://github.com/QaidVoid/glycin-ng
+license=('MIT' 'Apache-2.0')
+depends=('glibc')
+makedepends=('cargo' 'rust' 'git')
+provides=('glycin')
+conflicts=('glycin')
+replaces=('glycin')
+source=("$pkgname::git+https://github.com/QaidVoid/glycin-ng.git#tag=$pkgver")
+sha256sums=('SKIP')
+
+build() {
+  cd "$srcdir"/"$pkgname"
+  cargo build --release
+  cargo build --release -p glycin-ng-libglycin-shim
+}
+
+package() {
+  cd "$srcdir"/"$pkgname"
+  install -Dm755 ./target/release/libglycin_ng.so "$pkgdir"/usr/lib/libglycin_ng.so
+  install -Dm755 ./target/release/libglycin_2.so "$pkgdir"/usr/lib/libglycin-2.so.0
+}
+

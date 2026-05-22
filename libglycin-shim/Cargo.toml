@@ -23,6 +23,7 @@ features = [
   "bmp",
   "dds",
   "decode",
+  "encode",
   "exr",
   "gif",
   "ico",

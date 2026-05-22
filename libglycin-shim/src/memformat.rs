@@ -83,6 +83,21 @@ pub(crate) fn has_alpha_for_gly(value: i32) -> gboolean {
     }
 }
 
+pub(crate) fn from_gly(value: i32) -> Option<MemoryFormat> {
+    match value {
+        GLY_MEMORY_B8G8R8A8_PREMULTIPLIED => Some(MemoryFormat::B8g8r8a8Premultiplied),
+        GLY_MEMORY_A8R8G8B8_PREMULTIPLIED => Some(MemoryFormat::A8r8g8b8Premultiplied),
+        GLY_MEMORY_R8G8B8A8_PREMULTIPLIED => Some(MemoryFormat::R8g8b8a8Premultiplied),
+        GLY_MEMORY_B8G8R8A8 => Some(MemoryFormat::B8g8r8a8),
+        GLY_MEMORY_A8R8G8B8 => Some(MemoryFormat::A8r8g8b8),
+        GLY_MEMORY_R8G8B8A8 => Some(MemoryFormat::R8g8b8a8),
+        GLY_MEMORY_A8B8G8R8 => Some(MemoryFormat::A8b8g8r8),
+        GLY_MEMORY_R8G8B8 => Some(MemoryFormat::R8g8b8),
+        GLY_MEMORY_B8G8R8 => Some(MemoryFormat::B8g8r8),
+        _ => None,
+    }
+}
+
 pub(crate) fn is_premultiplied_for_gly(value: i32) -> gboolean {
     matches!(
         value,

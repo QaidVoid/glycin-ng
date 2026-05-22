@@ -79,6 +79,31 @@ impl KnownFormat {
             _ => None,
         }
     }
+
+    /// Match an IANA media type (e.g. `image/png`) to a known format.
+    /// Accepts the common `image/x-*` and `image/vnd.*` aliases.
+    pub fn from_mime_type(mime: &str) -> Option<Self> {
+        match mime.to_ascii_lowercase().as_str() {
+            "image/png" | "image/apng" => Some(Self::Png),
+            "image/jpeg" | "image/pjpeg" => Some(Self::Jpeg),
+            "image/gif" => Some(Self::Gif),
+            "image/webp" => Some(Self::WebP),
+            "image/tiff" => Some(Self::Tiff),
+            "image/bmp" | "image/x-bmp" => Some(Self::Bmp),
+            "image/x-ico" | "image/x-icon" | "image/vnd.microsoft.icon" => Some(Self::Ico),
+            "image/x-tga" | "image/x-targa" => Some(Self::Tga),
+            "image/x-qoi" | "image/qoi" => Some(Self::Qoi),
+            "image/x-exr" => Some(Self::Exr),
+            "image/x-portable-anymap"
+            | "image/x-portable-bitmap"
+            | "image/x-portable-graymap"
+            | "image/x-portable-pixmap" => Some(Self::Pnm),
+            "image/vnd-ms.dds" | "image/x-dds" => Some(Self::Dds),
+            "image/jxl" => Some(Self::Jxl),
+            "image/svg+xml" => Some(Self::Svg),
+            _ => None,
+        }
+    }
 }
 
 /// Detect a format from the leading bytes of an image.
