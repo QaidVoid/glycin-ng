@@ -2,20 +2,24 @@
  *
  * Link against libglycin_ng.so built with `cargo build --release
  * --features c-api`. All functions are thread-compatible but not
- * thread-safe per handle; do not share a single GlycinNgLoader or
- * GlycinNgImage across threads without external synchronization.
+ * thread-safe per handle; do not share a single GlycinNgLoader,
+ * GlycinNgImage, GlycinNgEncoder or GlycinNgEncodedImage across
+ * threads without external synchronization.
  *
  * Lifetimes:
- *   - GlycinNgLoader and GlycinNgImage are heap-allocated. Free them
- *     with glycin_ng_loader_free or glycin_ng_image_free.
+ *   - GlycinNgLoader, GlycinNgImage, GlycinNgEncoder, and
+ *     GlycinNgEncodedImage are heap-allocated. Free each with its
+ *     matching *_free function.
  *   - Pointers returned by glycin_ng_image_texture,
- *     glycin_ng_image_format_name, and glycin_ng_texture_data
- *     remain valid until the owning GlycinNgImage is freed.
+ *     glycin_ng_image_format_name, glycin_ng_texture_data, and
+ *     glycin_ng_encoded_image_data remain valid until the owning
+ *     handle is freed.
  *   - glycin_ng_last_error returns a pointer valid until the next
  *     call on the same thread that produces or clears an error.
  *
  * Error reporting:
- *   - Constructors and decode functions return NULL on failure.
+ *   - Constructors and decode/encode functions return NULL on
+ *     failure.
  *   - Setters return 0 on success and a negative value on failure.
  *   - On any failure, glycin_ng_last_error() returns a UTF-8
  *     NUL-terminated message describing what went wrong.
@@ -33,6 +37,8 @@ extern "C" {
 typedef struct GlycinNgLoader GlycinNgLoader;
 typedef struct GlycinNgImage GlycinNgImage;
 typedef struct GlycinNgTexture GlycinNgTexture;
+typedef struct GlycinNgEncoder GlycinNgEncoder;
+typedef struct GlycinNgEncodedImage GlycinNgEncodedImage;
 
 /* Texture pixel format constants. Match the Rust MemoryFormat. */
 #define GLYCIN_NG_FORMAT_UNKNOWN 0u
@@ -60,7 +66,8 @@ typedef struct GlycinNgTexture GlycinNgTexture;
 #define GLYCIN_NG_FORMAT_R32G32B32A32_F 26u
 #define GLYCIN_NG_FORMAT_R32G32B32A32_F_PRE 27u
 
-/* Known-format constants for glycin_ng_loader_format_hint. */
+/* Known-format constants for glycin_ng_loader_format_hint and
+ * glycin_ng_encoder_new. */
 #define GLYCIN_NG_KFMT_PNG 1u
 #define GLYCIN_NG_KFMT_JPEG 2u
 #define GLYCIN_NG_KFMT_GIF 3u
@@ -74,6 +81,7 @@ typedef struct GlycinNgTexture GlycinNgTexture;
 #define GLYCIN_NG_KFMT_PNM 11u
 #define GLYCIN_NG_KFMT_DDS 12u
 #define GLYCIN_NG_KFMT_JXL 13u
+#define GLYCIN_NG_KFMT_SVG 14u
 
 /* Error helpers. */
 const char* glycin_ng_last_error(void);
@@ -89,6 +97,19 @@ int glycin_ng_loader_sandbox(GlycinNgLoader* loader,
                              int landlock, int seccomp,
                              int rlimit, int strict);
 int glycin_ng_loader_format_hint(GlycinNgLoader* loader, unsigned int format);
+int glycin_ng_loader_apply_transformations(GlycinNgLoader* loader, int apply);
+int glycin_ng_loader_render_size_hint(GlycinNgLoader* loader,
+                                      uint32_t width, uint32_t height);
+int glycin_ng_loader_set_max_width(GlycinNgLoader* loader, uint32_t max_width);
+int glycin_ng_loader_set_max_height(GlycinNgLoader* loader, uint32_t max_height);
+int glycin_ng_loader_set_max_pixels(GlycinNgLoader* loader, uint64_t max_pixels);
+int glycin_ng_loader_set_max_frames(GlycinNgLoader* loader, uint32_t max_frames);
+int glycin_ng_loader_set_max_animation_seconds(GlycinNgLoader* loader,
+                                               uint64_t seconds);
+int glycin_ng_loader_set_decode_memory_mib(GlycinNgLoader* loader,
+                                           uint64_t mib);
+int glycin_ng_loader_set_decode_cpu_seconds(GlycinNgLoader* loader,
+                                            uint64_t seconds);
 
 /* Decode. Consumes the loader regardless of success. */
 GlycinNgImage* glycin_ng_loader_load(GlycinNgLoader* loader);
@@ -98,6 +119,8 @@ void glycin_ng_image_free(GlycinNgImage* image);
 uint32_t glycin_ng_image_width(const GlycinNgImage* image);
 uint32_t glycin_ng_image_height(const GlycinNgImage* image);
 size_t glycin_ng_image_frame_count(const GlycinNgImage* image);
+int glycin_ng_image_is_animated(const GlycinNgImage* image);
+uint16_t glycin_ng_image_orientation(const GlycinNgImage* image);
 const char* glycin_ng_image_format_name(const GlycinNgImage* image);
 const GlycinNgTexture* glycin_ng_image_texture(const GlycinNgImage* image,
                                                size_t index);
@@ -111,6 +134,37 @@ uint32_t glycin_ng_texture_stride(const GlycinNgTexture* texture);
 unsigned int glycin_ng_texture_format(const GlycinNgTexture* texture);
 const uint8_t* glycin_ng_texture_data(const GlycinNgTexture* texture);
 size_t glycin_ng_texture_data_len(const GlycinNgTexture* texture);
+
+/* Known-format resolution helpers. Return 0 when the input is
+ * unknown or invalid. */
+unsigned int glycin_ng_known_format_from_mime(const char* mime);
+unsigned int glycin_ng_known_format_from_extension(const char* ext);
+
+/* Encoder lifecycle. */
+GlycinNgEncoder* glycin_ng_encoder_new(unsigned int format);
+void glycin_ng_encoder_free(GlycinNgEncoder* encoder);
+
+/* Encoder configuration. */
+void glycin_ng_encoder_set_quality(GlycinNgEncoder* encoder, uint8_t quality);
+void glycin_ng_encoder_set_compression(GlycinNgEncoder* encoder,
+                                       uint8_t compression);
+int glycin_ng_encoder_set_icc_profile(GlycinNgEncoder* encoder,
+                                      const uint8_t* data, size_t len);
+int glycin_ng_encoder_add_metadata(GlycinNgEncoder* encoder,
+                                   const char* key, const char* value);
+int glycin_ng_encoder_add_frame(GlycinNgEncoder* encoder,
+                                uint32_t width, uint32_t height,
+                                uint32_t stride, unsigned int format,
+                                const uint8_t* data, size_t data_len);
+
+/* Encode. The encoder remains valid; freeing is the caller's
+ * responsibility. */
+GlycinNgEncodedImage* glycin_ng_encoder_encode(GlycinNgEncoder* encoder);
+
+/* Encoded-image accessors. */
+void glycin_ng_encoded_image_free(GlycinNgEncodedImage* image);
+const uint8_t* glycin_ng_encoded_image_data(const GlycinNgEncodedImage* image);
+size_t glycin_ng_encoded_image_len(const GlycinNgEncodedImage* image);
 
 #ifdef __cplusplus
 }

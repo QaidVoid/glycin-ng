@@ -1,0 +1,11 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: glycin-ng
+Description: Permissively-licensed Rust image decoder library with in-process sandboxing
+Version: @VERSION@
+URL: https://github.com/QaidVoid/glycin-ng
+Libs: -L${libdir} -lglycin_ng
+Cflags: -I${includedir}
