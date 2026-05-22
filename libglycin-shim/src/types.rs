@@ -116,6 +116,16 @@ pub(crate) struct CreatorState {
     pub(crate) frames: Mutex<Vec<FrameData>>,
     pub(crate) quality: Mutex<u8>,
     pub(crate) compression: Mutex<u8>,
+    /// ICC profile attached via `gly_new_frame_set_color_icc_profile`.
+    /// Applied during encode for codecs that can carry it (PNG iCCP,
+    /// JPEG APP2 ICC_PROFILE, WebP ICCP). Other codecs ignore it.
+    pub(crate) icc_profile: Mutex<Option<Vec<u8>>>,
+    /// Metadata key/value pairs forwarded via
+    /// `gly_creator_add_metadata_key_value`. Captured here so the data
+    /// is not silently lost, but the current encode path does not
+    /// embed it into the output. A future change can lower these into
+    /// PNG tEXt chunks, JPEG EXIF, etc.
+    pub(crate) metadata: Mutex<Vec<(String, String)>>,
 }
 
 pub(crate) struct FrameData {
