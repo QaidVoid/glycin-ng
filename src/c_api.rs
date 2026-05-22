@@ -213,6 +213,183 @@ pub unsafe extern "C" fn glycin_ng_loader_format_hint(
     0
 }
 
+/// Apply (or skip) EXIF orientation during decode. Pass a non-zero
+/// value to apply, 0 to leave the texture in its raw orientation.
+/// Default behavior, with no call, is to apply.
+///
+/// # Safety
+///
+/// `loader` must be a valid pointer returned by
+/// `glycin_ng_loader_new_*` and must not have been consumed or freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_loader_apply_transformations(
+    loader: *mut GlycinNgLoader,
+    apply: c_int,
+) -> c_int {
+    modify_loader(loader, |l| l.apply_transformations(apply != 0))
+}
+
+/// Request the decoder render at a specific output size in pixels.
+/// Only resolution-independent formats (currently SVG) honor the
+/// hint; raster decoders ignore it.
+///
+/// # Safety
+///
+/// `loader` must be a valid pointer returned by
+/// `glycin_ng_loader_new_*` and must not have been consumed or freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_loader_render_size_hint(
+    loader: *mut GlycinNgLoader,
+    width: u32,
+    height: u32,
+) -> c_int {
+    modify_loader(loader, |l| l.render_size_hint(width, height))
+}
+
+/// Cap the maximum decoded image width in pixels.
+///
+/// # Safety
+///
+/// `loader` must be a valid pointer returned by
+/// `glycin_ng_loader_new_*` and must not have been consumed or freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_loader_set_max_width(
+    loader: *mut GlycinNgLoader,
+    max_width: u32,
+) -> c_int {
+    modify_loader(loader, |l| {
+        let mut lim = l.current_limits();
+        lim.max_width = max_width;
+        l.limits(lim)
+    })
+}
+
+/// Cap the maximum decoded image height in pixels.
+///
+/// # Safety
+///
+/// `loader` must be a valid pointer returned by
+/// `glycin_ng_loader_new_*` and must not have been consumed or freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_loader_set_max_height(
+    loader: *mut GlycinNgLoader,
+    max_height: u32,
+) -> c_int {
+    modify_loader(loader, |l| {
+        let mut lim = l.current_limits();
+        lim.max_height = max_height;
+        l.limits(lim)
+    })
+}
+
+/// Cap the maximum total pixels (width times height times frame
+/// count) for the decoded image.
+///
+/// # Safety
+///
+/// `loader` must be a valid pointer returned by
+/// `glycin_ng_loader_new_*` and must not have been consumed or freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_loader_set_max_pixels(
+    loader: *mut GlycinNgLoader,
+    max_pixels: u64,
+) -> c_int {
+    modify_loader(loader, |l| {
+        let mut lim = l.current_limits();
+        lim.max_pixels = max_pixels;
+        l.limits(lim)
+    })
+}
+
+/// Cap the maximum frame count for animated decodes.
+///
+/// # Safety
+///
+/// `loader` must be a valid pointer returned by
+/// `glycin_ng_loader_new_*` and must not have been consumed or freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_loader_set_max_frames(
+    loader: *mut GlycinNgLoader,
+    max_frames: u32,
+) -> c_int {
+    modify_loader(loader, |l| {
+        let mut lim = l.current_limits();
+        lim.max_frames = max_frames;
+        l.limits(lim)
+    })
+}
+
+/// Cap the maximum sum-of-frame-delays for animated decodes, in
+/// seconds.
+///
+/// # Safety
+///
+/// `loader` must be a valid pointer returned by
+/// `glycin_ng_loader_new_*` and must not have been consumed or freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_loader_set_max_animation_seconds(
+    loader: *mut GlycinNgLoader,
+    seconds: u64,
+) -> c_int {
+    modify_loader(loader, |l| {
+        let mut lim = l.current_limits();
+        lim.max_animation_duration = std::time::Duration::from_secs(seconds);
+        l.limits(lim)
+    })
+}
+
+/// Cap the `RLIMIT_AS` value applied while decoding under the
+/// sandbox, in MiB.
+///
+/// # Safety
+///
+/// `loader` must be a valid pointer returned by
+/// `glycin_ng_loader_new_*` and must not have been consumed or freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_loader_set_decode_memory_mib(
+    loader: *mut GlycinNgLoader,
+    mib: u64,
+) -> c_int {
+    modify_loader(loader, |l| {
+        let mut lim = l.current_limits();
+        lim.decode_memory_mib = mib;
+        l.limits(lim)
+    })
+}
+
+/// Cap the `RLIMIT_CPU` value applied while decoding under the
+/// sandbox, in seconds.
+///
+/// # Safety
+///
+/// `loader` must be a valid pointer returned by
+/// `glycin_ng_loader_new_*` and must not have been consumed or freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_loader_set_decode_cpu_seconds(
+    loader: *mut GlycinNgLoader,
+    seconds: u64,
+) -> c_int {
+    modify_loader(loader, |l| {
+        let mut lim = l.current_limits();
+        lim.decode_cpu_seconds = seconds;
+        l.limits(lim)
+    })
+}
+
+fn modify_loader<F: FnOnce(Loader) -> Loader>(loader: *mut GlycinNgLoader, mutate: F) -> c_int {
+    clear_error();
+    let Some(handle) = (unsafe { loader.as_mut() }) else {
+        set_error("loader is null");
+        return -1;
+    };
+    let Some(inner) = handle.inner.take() else {
+        set_error("loader has already been consumed");
+        return -1;
+    };
+    handle.inner = Some(mutate(inner));
+    0
+}
+
 /// Consume the loader and decode the image.
 ///
 /// On success returns a non-NULL [`GlycinNgImage`] handle and the
@@ -278,6 +455,26 @@ pub unsafe extern "C" fn glycin_ng_image_height(image: *const GlycinNgImage) -> 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn glycin_ng_image_frame_count(image: *const GlycinNgImage) -> usize {
     image_ref(image).map(|i| i.frames().len()).unwrap_or(0)
+}
+
+/// Whether the image has more than one frame (non-zero == animated,
+/// 0 == still or NULL).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_image_is_animated(image: *const GlycinNgImage) -> c_int {
+    image_ref(image)
+        .map(|i| i.is_animated() as c_int)
+        .unwrap_or(0)
+}
+
+/// EXIF orientation value (1..=8) for the decoded image, or `1`
+/// (identity) when `image` is NULL or has no orientation set. The
+/// values follow the EXIF spec: `1` = upright, `3` = rotated 180,
+/// `6` = rotated 90 CW, `8` = rotated 90 CCW, etc.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_image_orientation(image: *const GlycinNgImage) -> u16 {
+    image_ref(image)
+        .map(|i| i.orientation().exif_value())
+        .unwrap_or(1)
 }
 
 /// Short lowercase format name (e.g. "png"). Returns NULL if
