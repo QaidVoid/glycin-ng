@@ -1,13 +1,16 @@
 # glycin-ng-libglycin-shim
 
 ABI-compatible `libglycin-2.so.0` that forwards every `gly_*` call to
-`glycin_ng`. Drop-in replacement for upstream `libglycin` on systems
-that have it as a hard `NEEDED` dependency.
+[`glycin-ng`](../). Drop-in replacement for upstream `libglycin`.
+
+- **~9x smaller install.** ~4 MiB vs ~37 MiB on Arch.
+- **No bubblewrap. No D-Bus. No helper binaries.**
+- **Permissive licensing only.** No LGPL or MPL transitive code.
 
 ## When you want this
 
 Newer `gdk-pixbuf` (2.42.10+) ships with optional glycin support
-compiled directly into `libgdk_pixbuf-2.0.so.0`. Arch's gdk-pixbuf2
+compiled directly into `libgdk_pixbuf-2.0.so.0`. Arch's `gdk-pixbuf2`
 package turns it on, so its `libgdk_pixbuf-2.0.so.0` carries a hard
 `NEEDED libglycin-2.so.0`. Without the shim you either:
 
@@ -23,43 +26,47 @@ be removed.
 
 ## Size comparison
 
-Both `libglycin-2.so.0` libraries are roughly the same size on disk;
-the difference is what each one pulls into the install. Numbers below
-are from `pacman -Q` on Arch x86_64 with the `glycin` and
-`glycin-loaders` packages installed and our shim built with release
-profile defaults:
+The shim is a thin forwarder. The decoders live in `libglycin_ng.so`,
+which the shim dynamically links to via `NEEDED libglycin_ng.so`. So
+a complete install is two files. Numbers below are from `pacman -Qi`
+on Arch x86_64 against locally-built release artifacts:
 
-| Component               | Upstream libglycin                                                                   | This shim          |
-|-------------------------|--------------------------------------------------------------------------------------|--------------------|
-| `libglycin-2.so.0`      | ~3.2 MB                                                                              | ~3.3 MB            |
-| Sandbox helper          | `bwrap` (~80 KB)                                                                     | (in-process)       |
-| Per-format loaders      | `glycin-image-rs` (~5.9 MB), `glycin-svg` (~2.1 MB), `glycin-jxl` (~2.5 MB), `glycin-heif` (~2.6 MB) | (in-process)       |
-| Transitive libraries    | `librsvg`, `libjxl`, `libjxl_threads`, `libjxl_cms`, `libdav1d`, `libheif`, ...      | none added         |
-| **Install weight**      | **~25-30 MB**                                                                        | **~3.3 MB**        |
-
-The shim is one self-contained shared library that bundles every
-default decoder. Upstream is a thin client of separately-installed
-helper binaries that link copyleft codec libraries.
+| Component               | Upstream libglycin                                                                   | This shim                |
+|-------------------------|--------------------------------------------------------------------------------------|--------------------------|
+| `libglycin-2.so.0`      | ~3.2 MiB                                                                             | ~290 KiB (thin forwarder)|
+| Decode engine           | (in separate loader binaries)                                                        | `libglycin_ng.so` ~3.7 MiB |
+| Sandbox helper          | `bwrap` (~97 KiB)                                                                    | (in-process)             |
+| Per-format loaders      | `glycin-image-rs`, `glycin-svg`, `glycin-jxl`, `glycin-heif` (shipped via `glycin-loaders`) | (in-process)       |
+| Transitive libraries    | `librsvg` ~10.3 MiB, `libjxl` ~9.7 MiB, `libheif`, `libopenraw`, `libdav1d`, ...     | none added               |
+| **Install weight**      | **~37 MiB** (measured: `glycin` + `librsvg` + `libjxl` + `bubblewrap`)               | **~4 MiB**               |
 
 ## Build
 
 ```
+cargo build --release -p glycin-ng-c
 cargo build --release -p glycin-ng-libglycin-shim
 ```
 
-Output: `target/release/libglycin_2.so` (~3.3 MB stripped on
-x86_64-gnu, with every default decoder bundled). `build.rs` pins the
-SONAME to `libglycin-2.so.0` regardless of the filename, so it
-resolves any caller's `NEEDED libglycin-2.so.0` cleanly.
+The first command produces `target/release/libglycin_ng.so` (the
+decode engine, ~3.7 MiB). The second produces
+`target/release/libglycin_2.so` (~290 KiB), which `build.rs` pins to
+`SONAME libglycin-2.so.0` and links dynamically against
+`libglycin_ng.so`. The shim resolves any caller's
+`NEEDED libglycin-2.so.0` cleanly.
 
 ## Install (drop-in)
 
 ```
 LIBDIR=$(pkg-config --variable=libdir gdk-pixbuf-2.0)
+sudo install -Dm755 target/release/libglycin_ng.so \
+    "$LIBDIR/libglycin_ng.so"
 sudo install -Dm755 target/release/libglycin_2.so \
     "$LIBDIR/libglycin-2.so.0"
 sudo ln -sf libglycin-2.so.0 "$LIBDIR/libglycin-2.so"
 ```
+
+Both shared objects must land in a directory the dynamic linker
+searches, since the shim resolves `libglycin_ng.so` at load time.
 
 Verify the swap took:
 
@@ -94,9 +101,15 @@ unused once the shim is in place and can be removed.
 
 ### Encode path
 
-All `gly_creator_*` and `gly_encoded_image_*` symbols exist for ABI
-compatibility but return `NULL` / `FALSE`. Callers that check return
-values fall through to their own encoder.
+`gly_creator_new` selects an encoder by MIME type. Supported targets:
+`image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/tiff`,
+`image/bmp`. `gly_creator_add_frame` / `_add_frame_with_stride`,
+`_add_metadata_key_value`, `_set_encoding_quality`,
+`_set_encoding_compression`, `_create`, and the
+`gly_encoded_image_*` accessors all forward to
+`glycin_ng::Encoder`. `gly_creator_set_sandbox_selector` is accepted
+and ignored (encode runs in-process under the same per-call sandbox
+as decode).
 
 ### Metadata
 

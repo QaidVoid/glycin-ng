@@ -5,9 +5,15 @@
 [![License](https://img.shields.io/crates/l/glycin-ng.svg)](#license)
 [![cargo-deny](https://github.com/QaidVoid/glycin-ng/actions/workflows/deny.yml/badge.svg)](https://github.com/QaidVoid/glycin-ng/actions/workflows/deny.yml)
 
-In-process image decoder for Linux desktop stacks. Pure-Rust codecs
-behind a single shared library, layered landlock + seccomp sandbox
-applied per decode, no helper processes.
+Drop-in replacement for
+[upstream glycin](https://gitlab.gnome.org/GNOME/glycin). One
+in-process Rust shared library.
+
+- **~9x smaller install.** ~4 MiB vs ~37 MiB on Arch.
+- **No bubblewrap. No D-Bus. No helper binaries.**
+- **Permissive licensing only.** No LGPL or MPL transitive code.
+- **Per-decode sandbox.** Landlock + seccomp + rlimit on the worker
+  thread.
 
 ```
                   +-----------------+
@@ -35,33 +41,6 @@ applied per decode, no helper processes.
                   |  Image, frames  |
                   +-----------------+
 ```
-
-## Why this exists
-
-[Upstream glycin](https://gitlab.gnome.org/GNOME/glycin) is the
-loader library new versions of `gdk-pixbuf` and GNOME apps depend on.
-It spawns one helper process per format under `bwrap`, talks to it
-over peer-to-peer D-Bus, and inherits LGPL / MPL transitive code from
-the codec libraries those helpers link against (librsvg, libjxl,
-libheif, libopenraw, ...).
-
-`glycin-ng` is a from-scratch, MIT/Apache replacement with the same
-position in the stack but:
-
-|                              | upstream glycin                   | glycin-ng                                          |
-|------------------------------|-----------------------------------|----------------------------------------------------|
-| Decoder license surface      | mixed (LGPL, MPL, BSD)            | permissive only (MIT, Apache, BSD, ISC, Zlib)      |
-| Decode boundary              | separate process per format       | in-process worker thread                           |
-| Sandbox mechanism            | bwrap (mount / PID / user ns)     | landlock + seccomp + rlimit                        |
-| IPC                          | peer-to-peer D-Bus                | direct function call                               |
-| Per-decode cost              | process spawn + namespace + IPC   | thread spawn + prctl                               |
-| Helper binaries shipped      | one per format                    | none                                               |
-| Behaves under Flatpak / AppImage / distrobox | needs a sandbox helper to nest | nests cleanly (layers only narrow further) |
-
-If you don't need an in-process boundary and want every available
-codec including the LGPL ones, you want upstream glycin. If you want
-permissive licensing or you're packaging into something already
-sandboxed where bwrap nesting is awkward, you want this.
 
 ## Quickstart
 
@@ -128,24 +107,49 @@ cargo build --release --features c-api
 
 Worked example in `examples/c_load.c`.
 
+## How it differs from upstream
+
+Upstream glycin sits in the same position in the stack: it is the
+loader library new versions of `gdk-pixbuf` and GNOME apps depend on.
+It spawns one helper process per format under `bwrap`, talks to it
+over peer-to-peer D-Bus, and inherits LGPL / MPL transitive code from
+the codec libraries those helpers link against (`librsvg`, `libjxl`,
+`libheif`, `libopenraw`, ...).
+
+|                              | upstream glycin                              | glycin-ng                                          |
+|------------------------------|----------------------------------------------|----------------------------------------------------|
+| Install footprint            | ~37 MiB (`glycin` + `librsvg` + `libjxl` + `bubblewrap`; grows with `glycin-loaders`, `libheif`, `libopenraw`) | ~4 MiB (`libglycin_ng.so` + shim) |
+| Decoder license surface      | mixed (LGPL, MPL, BSD)                       | permissive only (MIT, Apache, BSD, ISC, Zlib)      |
+| Decode boundary              | separate process per format                  | in-process worker thread                           |
+| Sandbox mechanism            | bwrap (mount / PID / user ns)                | landlock + seccomp + rlimit                        |
+| IPC                          | peer-to-peer D-Bus                           | direct function call                               |
+| Per-decode cost              | process spawn + namespace + IPC              | thread spawn + prctl                               |
+| Helper binaries shipped      | one per format                               | none                                               |
+| Behaves under Flatpak / AppImage / distrobox | needs a sandbox helper to nest | nests cleanly (layers only narrow further) |
+
+If you want every available codec including the LGPL ones, you want
+upstream glycin. If you want permissive licensing, a small install,
+or you're packaging into something already sandboxed where bwrap
+nesting is awkward, you want this.
+
 ## Supported formats
 
-| Format          | Backing crate   | Notes                                |
-|-----------------|-----------------|--------------------------------------|
-| PNG / APNG      | png             | animation                            |
-| JPEG            | jpeg-decoder    |                                      |
-| GIF             | gif             | animation                            |
-| WebP            | image-webp      | animation                            |
-| TIFF            | tiff            |                                      |
-| BMP             | image           |                                      |
-| ICO / CUR       | image           | picks largest entry                  |
-| TGA             | image           |                                      |
-| QOI             | qoi             |                                      |
-| OpenEXR         | image (exr)     | 16 / 32-bit float, HDR-aware         |
-| PNM family      | image           |                                      |
-| DDS             | image           |                                      |
-| JPEG XL         | jxl-oxide       |                                      |
-| SVG             | resvg / usvg    | GTK symbolic-icon wrappers expanded  |
+| Format          | Backing crate   | Decode | Encode | Notes                                |
+|-----------------|-----------------|--------|--------|--------------------------------------|
+| PNG / APNG      | png             | yes    | yes    | animation                            |
+| JPEG            | jpeg-decoder    | yes    | yes    |                                      |
+| GIF             | gif             | yes    | yes    | animation                            |
+| WebP            | image-webp      | yes    | yes    | animation                            |
+| TIFF            | tiff            | yes    | yes    |                                      |
+| BMP             | image           | yes    | yes    |                                      |
+| ICO / CUR       | image           | yes    | -      | picks largest entry                  |
+| TGA             | image           | yes    | -      |                                      |
+| QOI             | qoi             | yes    | -      |                                      |
+| OpenEXR         | image (exr)     | yes    | -      | 16 / 32-bit float, HDR-aware         |
+| PNM family      | image           | yes    | -      |                                      |
+| DDS             | image           | yes    | -      |                                      |
+| JPEG XL         | jxl-oxide       | yes    | -      |                                      |
+| SVG             | resvg / usvg    | yes    | -      | GTK symbolic-icon wrappers expanded  |
 
 Deferred because no permissive decoder exists yet: HEIF, AVIF, RAW.
 
@@ -195,7 +199,7 @@ Override via `Loader::limits(Limits { ... })`.
 
 | Group          | Default                          | Notes                                   |
 |----------------|----------------------------------|-----------------------------------------|
-| Capability     | `decode`, `metadata`             | `encode` deferred (no encoder yet)      |
+| Capability     | `decode`, `metadata`             | enable `encode` for PNG, JPEG, GIF, WebP, TIFF, BMP |
 | Sandbox        | `landlock`, `seccomp` (Linux)    | toggling off is supported for portability testing, not as a production posture |
 | Per-format     | `png`, `jpeg`, `gif`, `webp`, `tiff`, `bmp`, `ico`, `tga`, `qoi`, `exr`, `pnm`, `dds`, `jxl`, `svg` | trim individually     |
 | ABI            | (off) `c-api`                    | enables the `cdylib` build and `cbindgen` header |
