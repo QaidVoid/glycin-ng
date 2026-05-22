@@ -16,18 +16,6 @@ path = "src/lib.rs"
 bitflags = "2.11.1"
 libc = "0.2"
 
-[dependencies.image]
-version = "0.25"
-default-features = false
-features = [
-  "bmp",
-  "gif",
-  "jpeg",
-  "png",
-  "tiff",
-  "webp",
-]
-
 [dependencies.glycin-ng]
 path = ".."
 default-features = false
@@ -35,6 +23,7 @@ features = [
   "bmp",
   "dds",
   "decode",
+  "encode",
   "exr",
   "gif",
   "ico",

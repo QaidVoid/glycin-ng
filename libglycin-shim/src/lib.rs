@@ -27,14 +27,12 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use glycin_ng::Loader;
 
-use image::ImageEncoder;
-
 use crate::ffi::{
     GBytes, GError, GFile, GInputStream, GObject, GQuark, GStrv, GType, gboolean, gpointer,
 };
 use crate::types::{
-    CreatorState, EncodedImageState, FrameData, FrameRequestState, FrameState, ImageState,
-    LoaderState, Rerender,
+    CreatorState, EncodedImageState, FrameRequestState, FrameState, ImageState, LoaderState,
+    Rerender,
 };
 
 const STATE_KEY: &CStr = c"glycin_ng_state";
@@ -521,21 +519,27 @@ pub extern "C" fn gly_memory_format_is_premultiplied(format: c_int) -> gboolean 
 }
 
 // ----- Encode path -----
-
-/// Map a MIME type string to the corresponding `image::ImageFormat`.
-fn mime_type_to_format(mime: &str) -> Option<image::ImageFormat> {
-    match mime {
-        "image/png" => Some(image::ImageFormat::Png),
-        "image/jpeg" => Some(image::ImageFormat::Jpeg),
-        "image/gif" => Some(image::ImageFormat::Gif),
-        "image/webp" => Some(image::ImageFormat::WebP),
-        "image/tiff" => Some(image::ImageFormat::Tiff),
-        "image/bmp" | "image/x-bmp" => Some(image::ImageFormat::Bmp),
-        "image/x-ico" | "image/x-icon" | "image/vnd.microsoft.icon" => {
-            Some(image::ImageFormat::Ico)
-        }
-        _ => None,
-    }
+//
+// Thin wrapper over `glycin_ng::Encoder`. Each `gly_creator_*` entry
+// point forwards its arguments to the inner encoder; the heavy
+// lifting (pixel-format conversion, bounds-checking, codec dispatch,
+// ICC embedding) lives in `glycin_ng::encoder`.
+fn with_encoder<R>(
+    creator: *mut GObject,
+    error: *mut *mut GError,
+    fname: &str,
+    f: impl FnOnce(&mut glycin_ng::Encoder) -> R,
+) -> Option<R> {
+    let Some(state) = (unsafe { state_ref::<CreatorState>(creator) }) else {
+        unsafe { set_error(error, 0, &format!("{fname}: invalid creator")) };
+        return None;
+    };
+    let mut guard = state.encoder.lock().unwrap();
+    let Some(enc) = guard.as_mut() else {
+        unsafe { set_error(error, 0, &format!("{fname}: encoder already consumed")) };
+        return None;
+    };
+    Some(f(enc))
 }
 
 /// # Safety
@@ -557,7 +561,7 @@ pub unsafe extern "C" fn gly_creator_new(
             return ptr::null_mut();
         }
     };
-    if mime_type_to_format(mime).is_none() {
+    let Some(target) = glycin_ng::KnownFormat::from_mime_type(mime) else {
         unsafe {
             set_error(
                 error,
@@ -566,14 +570,16 @@ pub unsafe extern "C" fn gly_creator_new(
             )
         };
         return ptr::null_mut();
-    }
+    };
+    let encoder = match glycin_ng::Encoder::new(target) {
+        Ok(e) => e,
+        Err(e) => {
+            unsafe { set_error(error, 0, &format!("gly_creator_new: {e}")) };
+            return ptr::null_mut();
+        }
+    };
     let state = CreatorState {
-        mime_type: mime.to_string(),
-        frames: Mutex::new(Vec::new()),
-        quality: Mutex::new(75),
-        compression: Mutex::new(6),
-        icc_profile: Mutex::new(None),
-        metadata: Mutex::new(Vec::new()),
+        encoder: Mutex::new(Some(encoder)),
     };
     unsafe { attach_state(state) }
 }
@@ -616,13 +622,6 @@ pub unsafe extern "C" fn gly_creator_add_frame_with_stride(
     texture_bytes: *mut GBytes,
     error: *mut *mut GError,
 ) -> *mut GObject {
-    let state = match unsafe { state_ref::<CreatorState>(creator) } {
-        Some(s) => s,
-        None => {
-            unsafe { set_error(error, 0, "gly_creator_add_frame: invalid creator") };
-            return ptr::null_mut();
-        }
-    };
     if texture_bytes.is_null() {
         unsafe { set_error(error, 0, "gly_creator_add_frame: texture_bytes is NULL") };
         return ptr::null_mut();
@@ -633,38 +632,42 @@ pub unsafe extern "C" fn gly_creator_add_frame_with_stride(
         unsafe { set_error(error, 0, "gly_creator_add_frame: empty texture data") };
         return ptr::null_mut();
     }
-    let data = unsafe { slice::from_raw_parts(data_ptr as *const u8, size) };
-    // When the caller omits an explicit stride, the byte distance
-    // between rows is `width * bytes_per_pixel`. Hardcoding bpp = 4
-    // here would over-read the source for 24-bit RGB textures and
-    // tear the image apart row by row.
+    let Some(mf) = memformat::from_gly(memory_format) else {
+        unsafe { set_error(error, 0, "gly_creator_add_frame: unsupported memory format") };
+        return ptr::null_mut();
+    };
+    let data = unsafe { slice::from_raw_parts(data_ptr as *const u8, size) }.to_vec();
+    // Caller-supplied stride wins. When zero, fall back to
+    // `width * bytes_per_pixel` for the resolved format - using a
+    // hardcoded bpp of 4 would tear apart 24-bit RGB textures.
     let actual_stride = if stride > 0 {
         stride
     } else {
-        let Some(mf) = memformat::from_gly(memory_format) else {
-            unsafe { set_error(error, 0, "gly_creator_add_frame: unsupported memory format") };
-            return ptr::null_mut();
-        };
         width * mf.bytes_per_pixel() as u32
     };
-    let frame = FrameData {
+    let frame = glycin_ng::EncodeFrame {
         width,
         height,
-        memory_format,
-        data: data.to_vec(),
         stride: actual_stride,
+        format: mf,
+        data,
     };
-    state.frames.lock().unwrap().push(frame);
+    if with_encoder(creator, error, "gly_creator_add_frame", |enc| {
+        enc.add_frame(frame);
+    })
+    .is_none()
+    {
+        return ptr::null_mut();
+    }
     // Return the creator itself as the frame handle so gdk-pixbuf
     // can optionally call `gly_new_frame_set_color_icc_profile`.
     unsafe { ffi::g_object_ref(creator as *mut c_void) as *mut GObject }
 }
 
-/// Capture a metadata key/value pair on the creator. The values are
-/// retained on the [`CreatorState`] so callers can inspect or future
-/// encode paths can lower them into format-native containers (PNG
-/// tEXt, JPEG EXIF, etc.), but the current encoders do not yet embed
-/// them into the output.
+/// Capture a metadata key/value pair on the creator. The pair is
+/// retained on the underlying [`glycin_ng::Encoder`] so the data is
+/// not lost, even though current encoders do not yet embed it into
+/// the output.
 ///
 /// Returns TRUE on capture so gdk-pixbuf-driven saves do not fail
 /// when the host forwards a benign metadata key.
@@ -678,9 +681,6 @@ pub unsafe extern "C" fn gly_creator_add_metadata_key_value(
     value: *const c_char,
     _error: *mut *mut GError,
 ) -> gboolean {
-    let Some(state) = (unsafe { state_ref::<CreatorState>(creator) }) else {
-        return 0;
-    };
     if key.is_null() || value.is_null() {
         return 0;
     }
@@ -692,8 +692,17 @@ pub unsafe extern "C" fn gly_creator_add_metadata_key_value(
         Ok(s) => s.to_string(),
         Err(_) => return 0,
     };
-    state.metadata.lock().unwrap().push((k, v));
-    1
+    match with_encoder(
+        creator,
+        ptr::null_mut(),
+        "gly_creator_add_metadata_key_value",
+        |enc| {
+            enc.add_metadata(k, v);
+        },
+    ) {
+        Some(()) => 1,
+        None => 0,
+    }
 }
 
 /// # Safety
@@ -704,12 +713,17 @@ pub unsafe extern "C" fn gly_creator_set_encoding_quality(
     quality: u8,
     _error: *mut *mut GError,
 ) -> gboolean {
-    let state = match unsafe { state_ref::<CreatorState>(creator) } {
-        Some(s) => s,
-        None => return 0,
-    };
-    *state.quality.lock().unwrap() = quality;
-    1
+    match with_encoder(
+        creator,
+        ptr::null_mut(),
+        "gly_creator_set_encoding_quality",
+        |enc| {
+            enc.set_quality(quality);
+        },
+    ) {
+        Some(()) => 1,
+        None => 0,
+    }
 }
 
 /// # Safety
@@ -720,12 +734,17 @@ pub unsafe extern "C" fn gly_creator_set_encoding_compression(
     compression: u8,
     _error: *mut *mut GError,
 ) -> gboolean {
-    let state = match unsafe { state_ref::<CreatorState>(creator) } {
-        Some(s) => s,
-        None => return 0,
-    };
-    *state.compression.lock().unwrap() = compression;
-    1
+    match with_encoder(
+        creator,
+        ptr::null_mut(),
+        "gly_creator_set_encoding_compression",
+        |enc| {
+            enc.set_compression(compression);
+        },
+    ) {
+        Some(()) => 1,
+        None => 0,
+    }
 }
 
 /// # Safety
@@ -746,121 +765,18 @@ pub unsafe extern "C" fn gly_creator_create(
     creator: *mut GObject,
     error: *mut *mut GError,
 ) -> *mut GObject {
-    let state = match unsafe { state_ref::<CreatorState>(creator) } {
-        Some(s) => s,
-        None => {
-            unsafe { set_error(error, 0, "gly_creator_create: invalid creator") };
-            return ptr::null_mut();
-        }
-    };
-    let fmt = mime_type_to_format(&state.mime_type).unwrap();
-    let frames = state.frames.lock().unwrap();
-    let Some(frame) = frames.first() else {
-        unsafe { set_error(error, 0, "gly_creator_create: no frames to encode") };
+    let Some(state) = (unsafe { state_ref::<CreatorState>(creator) }) else {
+        unsafe { set_error(error, 0, "gly_creator_create: invalid creator") };
         return ptr::null_mut();
     };
-    // Multi-frame encode is not yet wired in: the C ABI has no
-    // per-frame delay parameter, so emitting an animation would need
-    // a fabricated cadence. Surface the limit explicitly so callers
-    // do not get a single-frame "still" silently when they queued an
-    // animation.
-    if frames.len() > 1 {
-        unsafe {
-            set_error(
-                error,
-                0,
-                "gly_creator_create: multi-frame encoding is not yet supported",
-            )
-        };
+    let Some(encoder) = state.encoder.lock().unwrap().take() else {
+        unsafe { set_error(error, 0, "gly_creator_create: encoder already consumed") };
         return ptr::null_mut();
-    }
-    let mf = match memformat::from_gly(frame.memory_format) {
-        Some(f) => f,
-        None => {
-            unsafe { set_error(error, 0, "gly_creator_create: unsupported memory format") };
-            return ptr::null_mut();
-        }
     };
-    let rgba = match convert::to_rgba8(&frame.data, frame.width, frame.height, frame.stride, mf) {
-        Some(d) => d,
-        None => {
-            unsafe {
-                set_error(
-                    error,
-                    0,
-                    "gly_creator_create: pixel format conversion failed",
-                )
-            };
-            return ptr::null_mut();
-        }
-    };
-    let quality = *state.quality.lock().unwrap();
-    let icc = state.icc_profile.lock().unwrap().clone();
-    let mut output = std::io::Cursor::new(Vec::new());
-    use image::ExtendedColorType as ECT;
-    let encode_result = match fmt {
-        image::ImageFormat::Png => {
-            let mut encoder = image::codecs::png::PngEncoder::new(&mut output);
-            if let Some(p) = icc {
-                let _ = encoder.set_icc_profile(p);
-            }
-            encoder.write_image(&rgba, frame.width, frame.height, ECT::Rgba8)
-        }
-        image::ImageFormat::Jpeg => {
-            let mut encoder =
-                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output, quality);
-            if let Some(p) = icc {
-                let _ = encoder.set_icc_profile(p);
-            }
-            encoder.write_image(&rgba, frame.width, frame.height, ECT::Rgba8)
-        }
-        image::ImageFormat::Bmp => {
-            let encoder = image::codecs::bmp::BmpEncoder::new(&mut output);
-            encoder.write_image(&rgba, frame.width, frame.height, ECT::Rgba8)
-        }
-        image::ImageFormat::Gif => {
-            let mut encoder = image::codecs::gif::GifEncoder::new(&mut output);
-            encoder.encode(&rgba, frame.width, frame.height, ECT::Rgba8)
-        }
-        image::ImageFormat::WebP => {
-            // `new_lossless` is the only WebP encoder the `image`
-            // crate exposes today; the `quality` knob is captured on
-            // the creator state but does not yet influence output.
-            let mut encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut output);
-            if let Some(p) = icc {
-                let _ = encoder.set_icc_profile(p);
-            }
-            encoder.write_image(&rgba, frame.width, frame.height, ECT::Rgba8)
-        }
-        image::ImageFormat::Tiff => {
-            let encoder = image::codecs::tiff::TiffEncoder::new(&mut output);
-            encoder.write_image(&rgba, frame.width, frame.height, ECT::Rgba8)
-        }
-        _ => {
-            unsafe {
-                set_error(
-                    error,
-                    0,
-                    &format!("gly_creator_create: unsupported format {}", state.mime_type),
-                )
-            };
-            return ptr::null_mut();
-        }
-    };
-    match encode_result {
-        Ok(()) => {
-            let data = output.into_inner();
-            let encoded = EncodedImageState { data };
-            unsafe { attach_state(encoded) }
-        }
+    match encoder.encode() {
+        Ok(data) => unsafe { attach_state(EncodedImageState { data }) },
         Err(e) => {
-            unsafe {
-                set_error(
-                    error,
-                    0,
-                    &format!("gly_creator_create: encoding failed: {e}"),
-                )
-            };
+            unsafe { set_error(error, 0, &format!("gly_creator_create: {e}")) };
             ptr::null_mut()
         }
     }
@@ -869,8 +785,8 @@ pub unsafe extern "C" fn gly_creator_create(
 /// Attach an ICC profile to the creator. `gly_creator_add_frame*`
 /// returns the creator itself (with an extra ref) as the "new frame"
 /// handle, so this function unwraps that and stores the profile on
-/// [`CreatorState`]. It is then applied by [`gly_creator_create`] for
-/// PNG (iCCP), JPEG (APP2 ICC_PROFILE), and WebP (ICCP) outputs.
+/// the inner encoder. It is then applied by [`gly_creator_create`]
+/// for PNG (iCCP), JPEG (APP2 ICC_PROFILE), and WebP (ICCP) outputs.
 /// Other formats ignore the profile.
 ///
 /// # Safety
@@ -881,22 +797,28 @@ pub unsafe extern "C" fn gly_new_frame_set_color_icc_profile(
     new_frame: *mut GObject,
     icc_profile: *mut GBytes,
 ) -> gboolean {
-    let Some(state) = (unsafe { state_ref::<CreatorState>(new_frame) }) else {
-        return 0;
+    let icc = if icc_profile.is_null() {
+        None
+    } else {
+        let mut size: usize = 0;
+        let data_ptr = unsafe { ffi::g_bytes_get_data(icc_profile, &mut size) };
+        if data_ptr.is_null() || size == 0 {
+            None
+        } else {
+            Some(unsafe { slice::from_raw_parts(data_ptr as *const u8, size) }.to_vec())
+        }
     };
-    if icc_profile.is_null() {
-        *state.icc_profile.lock().unwrap() = None;
-        return 1;
+    match with_encoder(
+        new_frame,
+        ptr::null_mut(),
+        "gly_new_frame_set_color_icc_profile",
+        |enc| {
+            enc.set_icc_profile(icc);
+        },
+    ) {
+        Some(()) => 1,
+        None => 0,
     }
-    let mut size: usize = 0;
-    let data_ptr = unsafe { ffi::g_bytes_get_data(icc_profile, &mut size) };
-    if data_ptr.is_null() || size == 0 {
-        *state.icc_profile.lock().unwrap() = None;
-        return 1;
-    }
-    let bytes = unsafe { slice::from_raw_parts(data_ptr as *const u8, size) }.to_vec();
-    *state.icc_profile.lock().unwrap() = Some(bytes);
-    1
 }
 
 /// # Safety

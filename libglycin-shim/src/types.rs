@@ -109,31 +109,12 @@ impl FrameRequestState {
     }
 }
 
-/// State backing a `GlyCreator`. Holds frames to encode and encoding
-/// parameters.
+/// State backing a `GlyCreator`. Wraps a [`glycin_ng::Encoder`]; the
+/// shim forwards every `gly_creator_*` C entry point to it. Lives
+/// behind an `Option` so `gly_creator_create` can `take()` the
+/// inner encoder (which consumes self on `encode`).
 pub(crate) struct CreatorState {
-    pub(crate) mime_type: String,
-    pub(crate) frames: Mutex<Vec<FrameData>>,
-    pub(crate) quality: Mutex<u8>,
-    pub(crate) compression: Mutex<u8>,
-    /// ICC profile attached via `gly_new_frame_set_color_icc_profile`.
-    /// Applied during encode for codecs that can carry it (PNG iCCP,
-    /// JPEG APP2 ICC_PROFILE, WebP ICCP). Other codecs ignore it.
-    pub(crate) icc_profile: Mutex<Option<Vec<u8>>>,
-    /// Metadata key/value pairs forwarded via
-    /// `gly_creator_add_metadata_key_value`. Captured here so the data
-    /// is not silently lost, but the current encode path does not
-    /// embed it into the output. A future change can lower these into
-    /// PNG tEXt chunks, JPEG EXIF, etc.
-    pub(crate) metadata: Mutex<Vec<(String, String)>>,
-}
-
-pub(crate) struct FrameData {
-    pub(crate) width: u32,
-    pub(crate) height: u32,
-    pub(crate) memory_format: i32,
-    pub(crate) data: Vec<u8>,
-    pub(crate) stride: u32,
+    pub(crate) encoder: Mutex<Option<glycin_ng::Encoder>>,
 }
 
 /// State backing a `GlyEncodedImage`.

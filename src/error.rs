@@ -41,6 +41,15 @@ pub enum Error {
         message: String,
     },
 
+    /// An enabled encoder reported an error specific to its format.
+    #[error("{format} encoder error: {message}")]
+    Encoder {
+        /// Format-name string (e.g. `"png"`, `"jpeg"`).
+        format: &'static str,
+        /// Encoder-provided message.
+        message: String,
+    },
+
     /// Internal invariant violation. Should never escape; please
     /// report it.
     #[error("internal error: {0}")]

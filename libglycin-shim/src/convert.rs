@@ -219,67 +219,6 @@ fn emit_pixel(target: MemoryFormat, r: u8, g: u8, b: u8, a: u8, out: &mut Vec<u8
     }
 }
 
-/// Maximum bytes [`to_rgba8`] will allocate for an output buffer.
-/// 1 GiB comfortably covers any reasonable screenshot or photo while
-/// rejecting obviously hostile inputs (e.g. 65535x65535xRgba8 =
-/// ~16 GiB) before the allocation request reaches the allocator.
-const MAX_OUTPUT_BYTES: usize = 1 << 30;
-
-/// Convert raw pixel data from the given `MemoryFormat` to flat RGBA8
-/// bytes (4 bytes per pixel, row-major, no padding between rows).
-/// Stride is the byte distance between the start of consecutive rows
-/// in the source.
-///
-/// Returns `None` if the source format is unsupported, the input
-/// buffer is too small for the claimed dimensions/stride, the stride
-/// is narrower than `width * bpp`, or an output allocation of
-/// `width * height * 4` bytes would exceed [`MAX_OUTPUT_BYTES`].
-pub(crate) fn to_rgba8(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    stride: u32,
-    src_format: MemoryFormat,
-) -> Option<Vec<u8>> {
-    let bpp = src_format.bytes_per_pixel() as usize;
-    let width = width as usize;
-    let height = height as usize;
-    let stride = stride as usize;
-
-    let row_bytes = width.checked_mul(bpp)?;
-    if row_bytes > stride {
-        return None;
-    }
-
-    if height > 0 {
-        let needed_in = height
-            .checked_sub(1)?
-            .checked_mul(stride)?
-            .checked_add(row_bytes)?;
-        if data.len() < needed_in {
-            return None;
-        }
-    }
-
-    let out_stride = width.checked_mul(4)?;
-    let out_total = out_stride.checked_mul(height)?;
-    if out_total > MAX_OUTPUT_BYTES {
-        return None;
-    }
-
-    let mut out = Vec::with_capacity(out_total);
-    for y in 0..height {
-        let row_offset = y * stride;
-        let row = &data[row_offset..row_offset + row_bytes];
-        for x in 0..width {
-            let p = &row[x * bpp..x * bpp + bpp];
-            let (r, g, b, a) = sample_rgba8(src_format, p)?;
-            out.extend_from_slice(&[r, g, b, a]);
-        }
-    }
-    Some(out)
-}
-
 fn unpremul_g8(g: u8, a: u8) -> (u8, u8) {
     if a == 0 {
         return (0, 0);
@@ -349,33 +288,5 @@ mod tests {
         let out = maybe_convert(f, Selection::R8G8B8A8.bits());
         assert_eq!(out.texture().format(), MemoryFormat::R8g8b8a8);
         assert_eq!(out.texture().data(), &[10, 20, 30, 255]);
-    }
-
-    #[test]
-    fn to_rgba8_succeeds_on_correctly_sized_input() {
-        let data = vec![1, 2, 3, 4, 5, 6];
-        let out = to_rgba8(&data, 2, 1, 6, MemoryFormat::R8g8b8).unwrap();
-        assert_eq!(out, vec![1, 2, 3, 255, 4, 5, 6, 255]);
-    }
-
-    #[test]
-    fn to_rgba8_rejects_short_input() {
-        // Claim 2x2 with stride 6, but supply only one row's bytes.
-        let data = vec![1, 2, 3, 4, 5, 6];
-        assert!(to_rgba8(&data, 2, 2, 6, MemoryFormat::R8g8b8).is_none());
-    }
-
-    #[test]
-    fn to_rgba8_rejects_stride_smaller_than_row() {
-        // 4 px of RGB needs 12 bytes per row; stride of 8 cannot fit.
-        let data = vec![0u8; 32];
-        assert!(to_rgba8(&data, 4, 4, 8, MemoryFormat::R8g8b8).is_none());
-    }
-
-    #[test]
-    fn to_rgba8_rejects_oversized_output_allocation() {
-        // 32768 * 32768 * 4 = 4 GiB, well past MAX_OUTPUT_BYTES.
-        let stub = [0u8; 4];
-        assert!(to_rgba8(&stub, 32768, 32768, 32768 * 4, MemoryFormat::R8g8b8a8).is_none());
     }
 }
