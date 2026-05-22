@@ -480,14 +480,7 @@ name = "glycin-ng-libglycin-shim"
 version = "0.2.1"
 dependencies = [
  "bitflags",
- "libc",
-]
-
-[[package]]
-name = "glycin-ng-pixbuf-loader"
-version = "0.2.1"
-dependencies = [
- "glycin-ng",
+ "glycin-ng-c",
  "libc",
 ]
 

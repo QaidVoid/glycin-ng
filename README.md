@@ -217,9 +217,6 @@ cargo build --no-default-features --features decode,png,jpeg
 - [`glycin-ng-libglycin-shim`](libglycin-shim/) - `libglycin-2.so.0`
   drop-in for systems that have hard-linked against upstream's
   libglycin (Arch's gdk-pixbuf2 is the canonical case).
-- [`glycin-ng-pixbuf-loader`](pixbuf-loader/) - single gdk-pixbuf
-  loader module registering every supported MIME, replacing the
-  per-format `libpixbufloader-*.so` modules.
 
 ## License
 
