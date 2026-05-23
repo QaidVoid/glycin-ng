@@ -508,6 +508,7 @@ fn format_name_cstr(name: &'static str) -> *const c_char {
         ("pnm", c"pnm"),
         ("dds", c"dds"),
         ("jxl", c"jxl"),
+        ("svg", c"svg"),
     ];
     for (rust, cstr) in NAMES {
         if *rust == name {

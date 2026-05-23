@@ -148,6 +148,26 @@ fn decode_png_through_c_api() {
     unsafe { glycin_ng_image_free(image) };
 }
 
+#[cfg(feature = "svg")]
+#[test]
+fn svg_format_name_round_trips_through_c_abi() {
+    // The libglycin-shim re-render path keys off this name to decide
+    // whether to stash source bytes for a later rescale. A missing
+    // entry in the C ABI lookup table silently returns NULL, which
+    // disables vector rescaling and forces gdk-pixbuf to bitmap-
+    // stretch the intrinsic size.
+    let bytes = br#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="red"/></svg>"#;
+    let loader = unsafe { glycin_ng_loader_new_bytes(bytes.as_ptr(), bytes.len()) };
+    assert!(!loader.is_null());
+    let image = unsafe { glycin_ng_loader_load(loader) };
+    assert!(!image.is_null(), "svg decode failed");
+    let name_ptr = unsafe { glycin_ng_image_format_name(image) };
+    assert!(!name_ptr.is_null(), "format_name returned NULL for svg");
+    let name = unsafe { CStr::from_ptr(name_ptr) }.to_str().unwrap();
+    assert_eq!(name, "svg");
+    unsafe { glycin_ng_image_free(image) };
+}
+
 #[test]
 fn decode_garbage_returns_null_with_error_message() {
     let bytes = b"not a png at all".to_vec();
