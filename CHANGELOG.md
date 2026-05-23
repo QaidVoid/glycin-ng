@@ -1,4 +1,14 @@
 
+## 0.2.2 — 2026-05-23
+
+### Bug Fixes
+
+- **c-api:** Include svg in format-name lookup table
+
+### Documentation
+
+- Update README
+
 ## 0.2.0 — 2026-05-22
 
 ### Documentation
