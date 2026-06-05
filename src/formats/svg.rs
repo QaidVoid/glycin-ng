@@ -76,11 +76,11 @@ fn bundled_fontdb() -> fontdb::Database {
     // Map all generic families to the bundled font so that usvg's
     // built-in Family::Serif fallback (and explicit sans-serif, etc.)
     // resolve to an actual face.
-    db.set_serif_family("Droid Sans");
-    db.set_sans_serif_family("Droid Sans");
-    db.set_monospace_family("Droid Sans");
-    db.set_cursive_family("Droid Sans");
-    db.set_fantasy_family("Droid Sans");
+    db.set_serif_family("Cantarell");
+    db.set_sans_serif_family("Cantarell");
+    db.set_monospace_family("Cantarell");
+    db.set_cursive_family("Cantarell");
+    db.set_fantasy_family("Cantarell");
     db
 }
 
