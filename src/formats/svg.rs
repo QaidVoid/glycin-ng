@@ -72,7 +72,7 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
 /// text rendering without needing system font discovery.
 fn bundled_fontdb() -> fontdb::Database {
     let mut db = fontdb::Database::new();
-    db.load_font_data(Vec::from(&include_bytes!("font.ttf")[..]));
+    db.load_font_data(Vec::from(&include_bytes!("Cantarell-Regular.ttf")[..]));
     // Map all generic families to the bundled font so that usvg's
     // built-in Family::Serif fallback (and explicit sans-serif, etc.)
     // resolve to an actual face.
