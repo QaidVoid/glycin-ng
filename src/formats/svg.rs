@@ -10,7 +10,11 @@ use crate::{Error, Frame, Image, MemoryFormat, Result, Texture};
 use super::DecodeOptions;
 
 pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
-    let parse_opt = Options::default();
+    let fontdb = bundled_fontdb();
+    let parse_opt = Options {
+        fontdb: std::sync::Arc::new(fontdb),
+        ..Default::default()
+    };
     let owned;
     let svg_bytes: &[u8] = match xinclude::expand(bytes) {
         Some(expanded) => {
@@ -58,6 +62,26 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
         height,
         vec![Frame::new(texture, None)],
     ))
+}
+
+/// Build a font database containing a bundled font. The font covers
+/// ASCII printable characters and is used as fallback for all generic
+/// families (serif, sans-serif, monospace, cursive, fantasy). usvg's
+/// default font selector already falls back to Family::Serif when a
+/// requested family is not found, so this single font handles all
+/// text rendering without needing system font discovery.
+fn bundled_fontdb() -> fontdb::Database {
+    let mut db = fontdb::Database::new();
+    db.load_font_data(Vec::from(&include_bytes!("font.ttf")[..]));
+    // Map all generic families to the bundled font so that usvg's
+    // built-in Family::Serif fallback (and explicit sans-serif, etc.)
+    // resolve to an actual face.
+    db.set_serif_family("Droid Sans");
+    db.set_sans_serif_family("Droid Sans");
+    db.set_monospace_family("Droid Sans");
+    db.set_cursive_family("Droid Sans");
+    db.set_fantasy_family("Droid Sans");
+    db
 }
 
 #[cfg(test)]
@@ -165,5 +189,17 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, Error::LimitExceeded("max_width")));
+    }
+
+    #[test]
+    fn renders_text_elements() {
+        let bytes = b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"128\" height=\"32\"><rect width=\"128\" height=\"32\" fill=\"white\"/><text x=\"10\" y=\"24\" font-family=\"sans-serif\" font-size=\"20\" fill=\"black\">18:30</text></svg>";
+        let image = decode(bytes, &opts()).unwrap();
+        let data = image.first_frame().unwrap().texture().data();
+        let non_white = data
+            .chunks_exact(4)
+            .filter(|p| p[0] < 240 || p[3] < 240)
+            .count();
+        assert!(non_white > 0, "text element '18:30' was not rendered");
     }
 }
