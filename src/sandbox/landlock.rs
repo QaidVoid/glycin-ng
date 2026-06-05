@@ -46,7 +46,6 @@ pub(crate) fn apply() -> LandlockPosture {
             };
         }
     };
-
     let status = match created.restrict_self() {
         Ok(s) => s,
         Err(_) => {
