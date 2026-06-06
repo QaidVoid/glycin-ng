@@ -472,7 +472,6 @@ version = "0.2.2"
 dependencies = [
  "base64",
  "criterion",
- "fontdb",
  "gif",
  "image",
  "image-webp",

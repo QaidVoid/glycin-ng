@@ -2,17 +2,18 @@
 
 mod xinclude;
 
+use std::sync::{Arc, LazyLock};
+
 use resvg::tiny_skia::{Pixmap, Transform};
-use resvg::usvg::{Options, Tree};
+use resvg::usvg::{Options, Tree, fontdb};
 
 use crate::{Error, Frame, Image, MemoryFormat, Result, Texture};
 
 use super::DecodeOptions;
 
 pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
-    let fontdb = bundled_fontdb();
     let parse_opt = Options {
-        fontdb: std::sync::Arc::new(fontdb),
+        fontdb: BUNDLED_FONTDB.clone(),
         ..Default::default()
     };
     let owned;
@@ -64,25 +65,24 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     ))
 }
 
-/// Build a font database containing a bundled font. The font covers
-/// ASCII printable characters and is used as fallback for all generic
-/// families (serif, sans-serif, monospace, cursive, fantasy). usvg's
-/// default font selector already falls back to Family::Serif when a
-/// requested family is not found, so this single font handles all
-/// text rendering without needing system font discovery.
-fn bundled_fontdb() -> fontdb::Database {
+/// Font database with a single bundled font, shared across every decode.
+///
+/// Building the database parses the embedded font, so it is done once and
+/// the resulting `Arc` is cloned per decode. All five generic families
+/// (serif, sans-serif, monospace, cursive, fantasy) are mapped to the
+/// bundled face: usvg's default font selector falls back to `Family::Serif`
+/// when a requested family is missing, so this single font handles all text
+/// rendering without any system font discovery, keeping the sandbox tight.
+static BUNDLED_FONTDB: LazyLock<Arc<fontdb::Database>> = LazyLock::new(|| {
     let mut db = fontdb::Database::new();
-    db.load_font_data(Vec::from(&include_bytes!("Cantarell-Regular.ttf")[..]));
-    // Map all generic families to the bundled font so that usvg's
-    // built-in Family::Serif fallback (and explicit sans-serif, etc.)
-    // resolve to an actual face.
+    db.load_font_data(include_bytes!("../../assets/Cantarell-Regular.ttf").to_vec());
     db.set_serif_family("Cantarell");
     db.set_sans_serif_family("Cantarell");
     db.set_monospace_family("Cantarell");
     db.set_cursive_family("Cantarell");
     db.set_fantasy_family("Cantarell");
-    db
-}
+    Arc::new(db)
+});
 
 #[cfg(test)]
 mod tests {

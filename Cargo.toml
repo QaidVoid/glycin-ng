@@ -34,7 +34,6 @@ name = "sandbox_overhead"
 
 [dependencies]
 base64 = { version = "0.22.1", optional = true }
-fontdb = { version = "0.23", default-features = false, features = ["fs"], optional = true }
 quick-xml = { version = "0.40.1", optional = true }
 thiserror = "2"
 
@@ -139,7 +138,7 @@ jxl = ["dep:jxl-oxide"]
 png = ["dep:png"]
 pnm = ["dep:image"]
 qoi = ["dep:qoi"]
-svg = ["dep:base64", "dep:fontdb", "dep:quick-xml", "dep:resvg"]
+svg = ["dep:base64", "dep:quick-xml", "dep:resvg"]
 tga = ["dep:image"]
 tiff = ["dep:tiff"]
 webp = ["dep:image-webp"]
