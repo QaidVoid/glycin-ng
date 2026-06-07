@@ -2,15 +2,20 @@
 
 mod xinclude;
 
+use std::sync::{Arc, LazyLock};
+
 use resvg::tiny_skia::{Pixmap, Transform};
-use resvg::usvg::{Options, Tree};
+use resvg::usvg::{Options, Tree, fontdb};
 
 use crate::{Error, Frame, Image, MemoryFormat, Result, Texture};
 
 use super::DecodeOptions;
 
 pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
-    let parse_opt = Options::default();
+    let parse_opt = Options {
+        fontdb: BUNDLED_FONTDB.clone(),
+        ..Default::default()
+    };
     let owned;
     let svg_bytes: &[u8] = match xinclude::expand(bytes) {
         Some(expanded) => {
@@ -59,6 +64,25 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
         vec![Frame::new(texture, None)],
     ))
 }
+
+/// Font database with a single bundled font, shared across every decode.
+///
+/// Building the database parses the embedded font, so it is done once and
+/// the resulting `Arc` is cloned per decode. All five generic families
+/// (serif, sans-serif, monospace, cursive, fantasy) are mapped to the
+/// bundled face: usvg's default font selector falls back to `Family::Serif`
+/// when a requested family is missing, so this single font handles all text
+/// rendering without any system font discovery, keeping the sandbox tight.
+static BUNDLED_FONTDB: LazyLock<Arc<fontdb::Database>> = LazyLock::new(|| {
+    let mut db = fontdb::Database::new();
+    db.load_font_data(include_bytes!("../../assets/Cantarell-Regular.ttf").to_vec());
+    db.set_serif_family("Cantarell");
+    db.set_sans_serif_family("Cantarell");
+    db.set_monospace_family("Cantarell");
+    db.set_cursive_family("Cantarell");
+    db.set_fantasy_family("Cantarell");
+    Arc::new(db)
+});
 
 #[cfg(test)]
 mod tests {
@@ -165,5 +189,17 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, Error::LimitExceeded("max_width")));
+    }
+
+    #[test]
+    fn renders_text_elements() {
+        let bytes = b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"128\" height=\"32\"><rect width=\"128\" height=\"32\" fill=\"white\"/><text x=\"10\" y=\"24\" font-family=\"sans-serif\" font-size=\"20\" fill=\"black\">18:30</text></svg>";
+        let image = decode(bytes, &opts()).unwrap();
+        let data = image.first_frame().unwrap().texture().data();
+        let non_white = data
+            .chunks_exact(4)
+            .filter(|p| p[0] < 240 || p[3] < 240)
+            .count();
+        assert!(non_white > 0, "text element '18:30' was not rendered");
     }
 }
