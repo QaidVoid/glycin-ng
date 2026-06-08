@@ -43,13 +43,23 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     let transform = Transform::from_scale(sx, sy);
     resvg::render(&tree, transform, &mut pixmap.as_mut());
 
+    // tiny_skia renders into a premultiplied buffer; un-premultiply so
+    // SVG matches the straight-alpha output of every other decoder.
+    // Consumers that treat the buffer as straight alpha (the common
+    // case) otherwise darken semi-transparent regions into invisibility.
+    let mut rgba = Vec::with_capacity(pixmap.data().len());
+    for px in pixmap.pixels() {
+        let c = px.demultiply();
+        rgba.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
+    }
+
     let stride = width.checked_mul(4).ok_or(Error::LimitExceeded("stride"))?;
     let texture = Texture::from_parts(
         width,
         height,
         stride,
-        MemoryFormat::R8g8b8a8Premultiplied,
-        pixmap.data().to_vec().into_boxed_slice(),
+        MemoryFormat::R8g8b8a8,
+        rgba.into_boxed_slice(),
     )
     .ok_or_else(|| Error::Decoder {
         format: "svg",
@@ -107,12 +117,9 @@ mod tests {
         assert_eq!(image.width(), 4);
         assert_eq!(image.height(), 4);
         let frame = image.first_frame().unwrap();
-        assert_eq!(
-            frame.texture().format(),
-            MemoryFormat::R8g8b8a8Premultiplied
-        );
+        assert_eq!(frame.texture().format(), MemoryFormat::R8g8b8a8);
         assert_eq!(frame.texture().data().len(), 4 * 4 * 4);
-        // First pixel should be red (255, 0, 0, 255) premultiplied -> (255, 0, 0, 255).
+        // First pixel should be opaque red (255, 0, 0, 255).
         let data = frame.texture().data();
         assert_eq!(&data[0..4], &[255, 0, 0, 255]);
     }
