@@ -98,7 +98,7 @@ unused once the shim is in place and can be removed.
 | `gly_image_get_mime_type`                                             | detected IANA media type of the decoded image                     |
 | `gly_frame_request_new` / `_set_loop_animation` / `_set_scale`         | stored; scaling is not yet applied                                |
 | `gly_frame_get_width` / `_height` / `_stride` / `_memory_format` / `_buf_bytes` / `_delay` |                                                       |
-| `gly_frame_get_color_cicp`                                            | returns `NULL`; engine does not surface CICP yet                  |
+| `gly_frame_get_color_cicp`                                            | CICP code points when present (PNG `cICP` chunk), else `NULL`      |
 | `gly_memory_format_has_alpha` / `_is_premultiplied`                    |                                                                   |
 | `gly_loader_get_mime_types`                                          | full set of decodable IANA media types as a `GStrv`               |
 | `gly_loader_error_quark`                                               |                                                                   |
@@ -144,10 +144,20 @@ as decode).
 
 ### Metadata
 
-`gly_image_get_metadata_keys` and `gly_image_get_metadata_key_value`
-return `NULL`. EXIF and ICC blobs are available on the underlying
-`glycin_ng::Image` but not yet projected through the `gly_*`
-key/value surface.
+`gly_image_get_metadata_keys` returns the image's text key/value
+metadata as a `GStrv`, and `gly_image_get_metadata_key_value` looks up
+a single value. The engine reads these straight from the PNG decoder
+(`tEXt`, `zTXt`, and `iTXt` chunks). Images without such metadata
+yield an empty list.
+
+### Color (CICP)
+
+`gly_frame_get_color_cicp` returns the frame's coding-independent code
+points (`GlyCicp`) when the source carries them (PNG `cICP` chunk), or
+`NULL` otherwise. The four code-point bytes come from the PNG decoder
+and are surfaced through the engine's C ABI. Decoding stays on
+permissive (MIT/Apache) dependencies; no copyleft metadata library is
+pulled in.
 
 ## Sandbox model
 

@@ -75,7 +75,7 @@ unsafe extern "C" fn state_drop<T>(data: gpointer) {
     }
 }
 
-unsafe fn state_ref<'a, T>(obj: *mut GObject) -> Option<&'a T> {
+pub(crate) unsafe fn state_ref<'a, T>(obj: *mut GObject) -> Option<&'a T> {
     if obj.is_null() {
         return None;
     }
@@ -337,22 +337,62 @@ pub unsafe extern "C" fn gly_image_get_transformation_orientation(image: *mut GO
     unsafe { ngapi::glycin_ng_image_orientation(state.inner) }
 }
 
+/// Return the image's text metadata keys as a `GStrv`.
+///
 /// # Safety
-/// `image` must be valid or NULL. Currently returns NULL: no
-/// per-key metadata is exposed yet.
+/// `image` must be valid or NULL. The returned `GStrv` is owned by the
+/// caller and freed with `g_strfreev`. An image with no such metadata
+/// yields an empty (single-NULL) array, matching upstream.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn gly_image_get_metadata_keys(_image: *mut GObject) -> GStrv {
-    ptr::null_mut()
+pub unsafe extern "C" fn gly_image_get_metadata_keys(image: *mut GObject) -> GStrv {
+    let count = (unsafe { state_ref::<ImageState>(image) })
+        .map(|state| unsafe { ngapi::glycin_ng_image_metadata_key_count(state.inner) })
+        .unwrap_or(0);
+    let state = unsafe { state_ref::<ImageState>(image) };
+    let slots = count + 1;
+    let arr = unsafe { ffi::g_malloc(slots * size_of::<*mut c_char>()) } as *mut *mut c_char;
+    if arr.is_null() {
+        return ptr::null_mut();
+    }
+    for i in 0..count {
+        let key = state
+            .map(|s| unsafe { ngapi::glycin_ng_image_metadata_key_at(s.inner, i) })
+            .unwrap_or(ptr::null());
+        let dup = if key.is_null() {
+            unsafe { ffi::g_strdup(c"".as_ptr()) }
+        } else {
+            unsafe { ffi::g_strdup(key) }
+        };
+        unsafe { *arr.add(i) = dup };
+    }
+    unsafe { *arr.add(count) = ptr::null_mut() };
+    arr
 }
 
+/// Return a freshly allocated copy of the value for `key`, or NULL
+/// when the key is absent.
+///
 /// # Safety
-/// `image` and `key` must be valid or NULL.
+/// `image` must be valid or NULL; `key` must be a valid C string or
+/// NULL. The returned string is owned by the caller and freed with
+/// `g_free`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_image_get_metadata_key_value(
-    _image: *mut GObject,
-    _key: *const c_char,
+    image: *mut GObject,
+    key: *const c_char,
 ) -> *mut c_char {
-    ptr::null_mut()
+    if key.is_null() {
+        return ptr::null_mut();
+    }
+    let Some(state) = (unsafe { state_ref::<ImageState>(image) }) else {
+        return ptr::null_mut();
+    };
+    let value = unsafe { ngapi::glycin_ng_image_metadata_value(state.inner, key) };
+    if value.is_null() {
+        ptr::null_mut()
+    } else {
+        unsafe { ffi::g_strdup(value) }
+    }
 }
 
 // ----- gly_image_get_specific_frame -----
@@ -414,8 +454,9 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
             if !new_image.is_null()
                 && let Some(raw) = extract_frame(new_image, 0, rerender.accepted_memory_formats)
             {
+                let cicp = fetch_cicp(new_image);
                 unsafe { ngapi::glycin_ng_image_free(new_image) };
-                return unsafe { attach_state(FrameState { frame: raw }) };
+                return unsafe { attach_state(FrameState { frame: raw, cicp }) };
             }
             if !new_image.is_null() {
                 unsafe { ngapi::glycin_ng_image_free(new_image) };
@@ -436,7 +477,15 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
         unsafe { set_error(error, 0, "frame extraction failed") };
         return ptr::null_mut();
     };
-    unsafe { attach_state(FrameState { frame: raw }) }
+    let cicp = fetch_cicp(img_state.inner);
+    unsafe { attach_state(FrameState { frame: raw, cicp }) }
+}
+
+/// Read the image's CICP code points from the engine, if present.
+fn fetch_cicp(image: *mut ngapi::GlycinNgImage) -> Option<[u8; 4]> {
+    let mut buf = [0u8; 4];
+    let present = unsafe { ngapi::glycin_ng_image_cicp(image, buf.as_mut_ptr()) };
+    (present != 0).then_some(buf)
 }
 
 // ----- gly_image_next_frame -----

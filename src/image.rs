@@ -192,6 +192,8 @@ pub struct Image {
     orientation: Orientation,
     icc_profile: Option<Vec<u8>>,
     exif: Option<Vec<u8>>,
+    metadata_key_value: Option<std::collections::BTreeMap<String, String>>,
+    cicp: Option<[u8; 4]>,
     frames: Vec<Frame>,
     sandbox_posture: SandboxPosture,
 }
@@ -217,6 +219,8 @@ impl Image {
             orientation: Orientation::Normal,
             icc_profile: None,
             exif: None,
+            metadata_key_value: None,
+            cicp: None,
             frames,
             sandbox_posture: SandboxPosture::none(),
         }
@@ -235,6 +239,19 @@ impl Image {
     /// Attach an EXIF blob.
     pub fn set_exif(&mut self, exif: Vec<u8>) {
         self.exif = Some(exif);
+    }
+
+    /// Attach a text key/value metadata map (for example PNG textual
+    /// chunks). An empty map is stored as `None`.
+    pub fn set_metadata_key_value(&mut self, map: std::collections::BTreeMap<String, String>) {
+        self.metadata_key_value = if map.is_empty() { None } else { Some(map) };
+    }
+
+    /// Attach coding-independent code points (CICP) as the four bytes
+    /// `[color_primaries, transfer_characteristics, matrix_coefficients,
+    /// video_full_range_flag]`.
+    pub fn set_cicp(&mut self, cicp: [u8; 4]) {
+        self.cicp = Some(cicp);
     }
 
     pub(crate) fn set_sandbox_posture(&mut self, posture: SandboxPosture) {
@@ -285,6 +302,17 @@ impl Image {
     /// Embedded EXIF blob, if present.
     pub fn exif(&self) -> Option<&[u8]> {
         self.exif.as_deref()
+    }
+
+    /// Text key/value metadata, if any was extracted.
+    pub fn metadata_key_value(&self) -> Option<&std::collections::BTreeMap<String, String>> {
+        self.metadata_key_value.as_ref()
+    }
+
+    /// CICP code points as `[color_primaries, transfer_characteristics,
+    /// matrix_coefficients, video_full_range_flag]`, if present.
+    pub fn cicp(&self) -> Option<[u8; 4]> {
+        self.cicp
     }
 
     /// All decoded frames.

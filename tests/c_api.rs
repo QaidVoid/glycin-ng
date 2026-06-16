@@ -48,6 +48,16 @@ unsafe extern "C" {
     fn glycin_ng_image_is_animated(image: *const GlycinNgImage) -> i32;
     fn glycin_ng_image_orientation(image: *const GlycinNgImage) -> u16;
     fn glycin_ng_image_format_name(image: *const GlycinNgImage) -> *const c_char;
+    fn glycin_ng_image_metadata_key_count(image: *const GlycinNgImage) -> usize;
+    fn glycin_ng_image_metadata_key_at(
+        image: *const GlycinNgImage,
+        index: usize,
+    ) -> *const c_char;
+    fn glycin_ng_image_metadata_value(
+        image: *const GlycinNgImage,
+        key: *const c_char,
+    ) -> *const c_char;
+    fn glycin_ng_image_cicp(image: *const GlycinNgImage, out: *mut u8) -> i32;
     fn glycin_ng_image_texture(
         image: *const GlycinNgImage,
         index: usize,
@@ -365,4 +375,45 @@ fn known_format_from_extension_handles_aliases() {
     assert_eq!(jpg, jpeg);
     assert!(jpeg != 0);
     assert_eq!(bogus, 0);
+}
+
+#[cfg(feature = "metadata")]
+#[test]
+fn metadata_key_value_and_cicp_via_ffi() {
+    use std::collections::BTreeSet;
+
+    let text_png = include_bytes!("data/text-metadata.png");
+    let loader = unsafe { glycin_ng_loader_new_bytes(text_png.as_ptr(), text_png.len()) };
+    let image = unsafe { glycin_ng_loader_load(loader) };
+    assert!(!image.is_null());
+
+    let count = unsafe { glycin_ng_image_metadata_key_count(image) };
+    let mut keys = BTreeSet::new();
+    for i in 0..count {
+        let p = unsafe { glycin_ng_image_metadata_key_at(image, i) };
+        assert!(!p.is_null());
+        keys.insert(unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned());
+    }
+    assert!(keys.contains("Comment"));
+
+    let value = unsafe { glycin_ng_image_metadata_value(image, c"Comment".as_ptr()) };
+    assert!(!value.is_null());
+    assert_eq!(unsafe { CStr::from_ptr(value) }.to_str().unwrap(), "hello");
+
+    let absent = unsafe { glycin_ng_image_metadata_value(image, c"Nope".as_ptr()) };
+    assert!(absent.is_null());
+
+    // The text PNG carries no cICP chunk.
+    let mut buf = [0u8; 4];
+    assert_eq!(unsafe { glycin_ng_image_cicp(image, buf.as_mut_ptr()) }, 0);
+    unsafe { glycin_ng_image_free(image) };
+
+    let cicp_png = include_bytes!("data/cicp.png");
+    let loader = unsafe { glycin_ng_loader_new_bytes(cicp_png.as_ptr(), cicp_png.len()) };
+    let image = unsafe { glycin_ng_loader_load(loader) };
+    assert!(!image.is_null());
+    let mut buf = [0u8; 4];
+    assert_eq!(unsafe { glycin_ng_image_cicp(image, buf.as_mut_ptr()) }, 1);
+    assert_eq!(buf, [9, 16, 0, 1]);
+    unsafe { glycin_ng_image_free(image) };
 }

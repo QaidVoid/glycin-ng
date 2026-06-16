@@ -133,6 +133,16 @@ unsafe extern "C" {
         index: usize,
     ) -> *const GlycinNgTexture;
     pub(crate) fn glycin_ng_image_frame_delay_ms(image: *const GlycinNgImage, index: usize) -> u64;
+    pub(crate) fn glycin_ng_image_metadata_key_count(image: *const GlycinNgImage) -> usize;
+    pub(crate) fn glycin_ng_image_metadata_key_at(
+        image: *const GlycinNgImage,
+        index: usize,
+    ) -> *const c_char;
+    pub(crate) fn glycin_ng_image_metadata_value(
+        image: *const GlycinNgImage,
+        key: *const c_char,
+    ) -> *const c_char;
+    pub(crate) fn glycin_ng_image_cicp(image: *const GlycinNgImage, out: *mut u8) -> c_int;
 
     // Texture accessors.
     pub(crate) fn glycin_ng_texture_width(texture: *const GlycinNgTexture) -> u32;

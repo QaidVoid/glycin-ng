@@ -46,9 +46,33 @@ pub struct GlycinNgLoader {
 }
 
 /// Opaque [`Image`] handle.
+///
+/// `metadata` caches NUL-terminated copies of the image's text
+/// key/value pairs so the accessors can hand back borrowed pointers
+/// that stay valid for the handle's lifetime.
 #[repr(C)]
 pub struct GlycinNgImage {
     inner: Image,
+    metadata: Vec<(CString, CString)>,
+}
+
+impl GlycinNgImage {
+    fn wrap(image: Image) -> Self {
+        let metadata = image
+            .metadata_key_value()
+            .map(|map| {
+                map.iter()
+                    .filter_map(|(k, v)| {
+                        Some((CString::new(k.as_str()).ok()?, CString::new(v.as_str()).ok()?))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            inner: image,
+            metadata,
+        }
+    }
 }
 
 thread_local! {
@@ -414,7 +438,7 @@ pub unsafe extern "C" fn glycin_ng_loader_load(loader: *mut GlycinNgLoader) -> *
         return ptr::null_mut();
     };
     match inner.load() {
-        Ok(image) => Box::into_raw(Box::new(GlycinNgImage { inner: image })),
+        Ok(image) => Box::into_raw(Box::new(GlycinNgImage::wrap(image))),
         Err(e) => {
             set_error(e);
             ptr::null_mut()
@@ -521,6 +545,77 @@ fn format_name_cstr(name: &'static str) -> *const c_char {
 fn frame_ref<'a>(image: *const GlycinNgImage, index: usize) -> Option<&'a Frame> {
     let img = image_ref(image)?;
     img.frames().get(index)
+}
+
+fn handle_ref<'a>(image: *const GlycinNgImage) -> Option<&'a GlycinNgImage> {
+    unsafe { image.as_ref() }
+}
+
+/// Number of text key/value metadata pairs on the image (0 if `image`
+/// is NULL or the image carries no such metadata).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_image_metadata_key_count(image: *const GlycinNgImage) -> usize {
+    handle_ref(image).map(|h| h.metadata.len()).unwrap_or(0)
+}
+
+/// Metadata key at `index` (NULL on out-of-bounds or NULL image). The
+/// pointer remains valid for the lifetime of the image handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_image_metadata_key_at(
+    image: *const GlycinNgImage,
+    index: usize,
+) -> *const c_char {
+    match handle_ref(image).and_then(|h| h.metadata.get(index)) {
+        Some((key, _)) => key.as_ptr(),
+        None => ptr::null(),
+    }
+}
+
+/// Value for the metadata `key` (NULL if absent, or `image`/`key` is
+/// NULL). The pointer remains valid for the lifetime of the image
+/// handle.
+///
+/// # Safety
+///
+/// `key` must be a valid NUL-terminated C string, or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_image_metadata_value(
+    image: *const GlycinNgImage,
+    key: *const c_char,
+) -> *const c_char {
+    if key.is_null() {
+        return ptr::null();
+    }
+    let Some(handle) = handle_ref(image) else {
+        return ptr::null();
+    };
+    let needle = unsafe { CStr::from_ptr(key) };
+    for (k, v) in &handle.metadata {
+        if k.as_c_str() == needle {
+            return v.as_ptr();
+        }
+    }
+    ptr::null()
+}
+
+/// Write the image's four CICP bytes (`[color_primaries,
+/// transfer_characteristics, matrix_coefficients,
+/// video_full_range_flag]`) into `out` and return 1, or return 0 when
+/// the image has no CICP or `image`/`out` is NULL.
+///
+/// # Safety
+///
+/// When non-NULL, `out` must point to at least four writable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_image_cicp(image: *const GlycinNgImage, out: *mut u8) -> c_int {
+    if out.is_null() {
+        return 0;
+    }
+    let Some(cicp) = image_ref(image).and_then(|i| i.cicp()) else {
+        return 0;
+    };
+    unsafe { ptr::copy_nonoverlapping(cicp.as_ptr(), out, 4) };
+    1
 }
 
 /// Texture of the frame at `index` (NULL on out-of-bounds or NULL

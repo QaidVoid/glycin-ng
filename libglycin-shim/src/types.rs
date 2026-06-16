@@ -170,6 +170,9 @@ pub(crate) struct Rerender {
 /// outlives the originating image handle.
 pub(crate) struct FrameState {
     pub(crate) frame: crate::convert::RawFrame,
+    /// CICP code points carried over from the originating image, if
+    /// any. Used by `gly_frame_get_color_cicp`.
+    pub(crate) cicp: Option<[u8; 4]>,
 }
 
 /// State backing a `GlyFrameRequest`.
