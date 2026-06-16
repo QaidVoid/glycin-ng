@@ -94,10 +94,41 @@ unused once the shim is in place and can be removed.
 | `gly_loader_load`                                                      | decode                                                            |
 | `gly_image_get_width` / `_height` / `_transformation_orientation`      |                                                                   |
 | `gly_image_get_specific_frame`                                         | advances a cursor through animation frames                        |
+| `gly_image_next_frame`                                                 | next frame with a default request, looping at the end             |
+| `gly_image_get_mime_type`                                             | detected IANA media type of the decoded image                     |
 | `gly_frame_request_new` / `_set_loop_animation` / `_set_scale`         | stored; scaling is not yet applied                                |
 | `gly_frame_get_width` / `_height` / `_stride` / `_memory_format` / `_buf_bytes` / `_delay` |                                                       |
+| `gly_frame_get_color_cicp`                                            | returns `NULL`; engine does not surface CICP yet                  |
 | `gly_memory_format_has_alpha` / `_is_premultiplied`                    |                                                                   |
+| `gly_loader_get_mime_types`                                          | full set of decodable IANA media types as a `GStrv`               |
 | `gly_loader_error_quark`                                               |                                                                   |
+
+### Asynchronous variants
+
+`gly_loader_load_async` / `_finish`, `gly_image_next_frame_async` /
+`_finish`, `gly_image_get_specific_frame_async` / `_finish`,
+`gly_creator_create_async` / `_finish`, and
+`gly_loader_get_mime_types_async` / `_finish` wrap their synchronous
+counterparts in a `GTask` and run on a GLib thread-pool thread, so the
+caller's main loop is never blocked. The `_finish` functions propagate
+the result or the error.
+
+### Type registration
+
+`gly_memory_format_get_type`, `gly_sandbox_selector_get_type`, and
+`gly_loader_error_get_type` register GLib enums;
+`gly_memory_format_selection_get_type` registers a flags type;
+`gly_cicp_get_type` registers a boxed type with
+`gly_cicp_copy` / `gly_cicp_free`; and `gly_loader_get_type`,
+`gly_image_get_type`, `gly_frame_get_type`,
+`gly_frame_request_get_type`, `gly_creator_get_type`,
+`gly_encoded_image_get_type`, and `gly_new_frame_get_type` register
+`GObject` subtypes sized from the parent. The enum and flags value
+names and nicks reproduce what upstream's `#[derive(glib::Enum)]`
+registers (the UpperCamelCase variant name and its kebab-case nick,
+for example `NoMoreFrames` and `no-more-frames`), so
+`g_enum_get_value_by_name` and `_by_nick` resolve the same strings as
+upstream.
 
 ### Encode path
 
@@ -141,10 +172,13 @@ performs no state change.
 base-class `GObject`s with Rust state attached via
 `g_object_set_data_full`. State is freed by the attached destroy
 notify when the host calls `g_object_unref` and the refcount hits
-zero. We skip full `GType` registration; consumers that introspect
-via `G_TYPE_CHECK_INSTANCE_*` will not see a `GLY_TYPE_LOADER`
-derivation. Every gdk-pixbuf code path that uses these handles
-strictly through the `gly_*` C surface is unaffected.
+zero. The `gly_*_get_type` functions register the matching subtypes,
+so `GLY_TYPE_LOADER` and friends resolve to real, named `GType`s, but
+the handles are not instantiated as those subtypes. Consumers that
+introspect a handle via `G_TYPE_CHECK_INSTANCE_*` therefore see a base
+`GObject` rather than the registered derivation. Every gdk-pixbuf code
+path that uses these handles strictly through the `gly_*` C surface is
+unaffected.
 
 ## License
 

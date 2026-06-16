@@ -13,14 +13,22 @@
 //! is not bundled into two shared objects.
 //!
 //! The opaque `GlyLoader`, `GlyImage`, `GlyFrame`, and
-//! `GlyFrameRequest` types are returned as base `GObject`s with our
-//! Rust-side state attached via `g_object_set_data_full`. This
-//! sidesteps full GType registration and is sufficient for
-//! everything Arch's gdk-pixbuf does with these handles.
+//! `GlyFrameRequest` handles are returned as base `GObject`s with our
+//! Rust-side state attached via `g_object_set_data_full`, rather than
+//! as instances of their registered subtypes. The `gly_*_get_type`
+//! functions still register those subtypes (see [`gtypes`]) so callers
+//! and introspection see the expected `GType`s, but the handles
+//! themselves stay base `GObject`s, which is sufficient for everything
+//! Arch's gdk-pixbuf does with them.
 
+mod asyncops;
+mod cicp;
 mod convert;
 mod ffi;
+mod gtypes;
 mod memformat;
+mod mime;
+mod mimelist;
 mod ngapi;
 mod types;
 
@@ -78,7 +86,7 @@ unsafe fn state_ref<'a, T>(obj: *mut GObject) -> Option<&'a T> {
     Some(unsafe { &*(raw as *const T) })
 }
 
-unsafe fn set_error(error: *mut *mut GError, code: c_int, msg: &str) {
+pub(crate) unsafe fn set_error(error: *mut *mut GError, code: c_int, msg: &str) {
     if error.is_null() {
         return;
     }
@@ -289,7 +297,8 @@ pub unsafe extern "C" fn gly_loader_load(
             None
         }
     });
-    unsafe { attach_state(ImageState::new(image_ptr, frame_count, rerender)) }
+    let mime = mime::from_format_name(&format_name).and_then(|m| CString::new(m).ok());
+    unsafe { attach_state(ImageState::new(image_ptr, frame_count, rerender, mime)) }
 }
 
 fn is_rescalable_format(name: &str) -> bool {
@@ -428,6 +437,40 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
         return ptr::null_mut();
     };
     unsafe { attach_state(FrameState { frame: raw }) }
+}
+
+// ----- gly_image_next_frame -----
+
+/// Load the next animation frame, looping to the first frame after
+/// the last one. Equivalent to `gly_image_get_specific_frame` with a
+/// default frame request.
+///
+/// # Safety
+/// `image` must be valid or NULL; `error` may be NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gly_image_next_frame(
+    image: *mut GObject,
+    error: *mut *mut GError,
+) -> *mut GObject {
+    unsafe { gly_image_get_specific_frame(image, ptr::null_mut(), error) }
+}
+
+// ----- gly_image_get_mime_type -----
+
+/// Return the detected MIME type of the image.
+///
+/// # Safety
+/// `image` must be valid or NULL. The returned string is owned by the
+/// image and stays valid until the image is freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gly_image_get_mime_type(image: *mut GObject) -> *const c_char {
+    let Some(state) = (unsafe { state_ref::<ImageState>(image) }) else {
+        return ptr::null();
+    };
+    match &state.mime {
+        Some(m) => m.as_ptr(),
+        None => ptr::null(),
+    }
 }
 
 fn extract_frame(
@@ -860,4 +903,90 @@ pub unsafe extern "C" fn gly_encoded_image_get_data(encoded: *mut GObject) -> *m
         return ptr::null_mut();
     }
     unsafe { ffi::g_bytes_new(data_ptr as *const c_void, data_len) }
+}
+
+#[cfg(test)]
+mod symbol_coverage {
+    //! Guard the full `libglycin-2` export surface. Removing any
+    //! entry point breaks ABI compatibility for apps built against
+    //! upstream glycin, so this test fails the build if the set of
+    //! exported `gly_*` functions ever shrinks below the 63 symbols
+    //! upstream's `glycin.h` declares for `libglycin-2.so.0`.
+
+    /// Every `gly_*` symbol the shim must export, referenced by
+    /// address so the test stops compiling if one is deleted.
+    fn exports() -> Vec<*const ()> {
+        vec![
+        super::gly_loader_error_quark as *const (),
+        super::gly_loader_new as *const (),
+        super::gly_loader_new_for_bytes as *const (),
+        super::gly_loader_new_for_stream as *const (),
+        super::gly_loader_set_sandbox_selector as *const (),
+        super::gly_loader_set_apply_transformations as *const (),
+        super::gly_loader_set_accepted_memory_formats as *const (),
+        super::gly_loader_load as *const (),
+        super::gly_image_get_width as *const (),
+        super::gly_image_get_height as *const (),
+        super::gly_image_get_transformation_orientation as *const (),
+        super::gly_image_get_metadata_keys as *const (),
+        super::gly_image_get_metadata_key_value as *const (),
+        super::gly_image_get_specific_frame as *const (),
+        super::gly_image_next_frame as *const (),
+        super::gly_image_get_mime_type as *const (),
+        super::gly_frame_request_new as *const (),
+        super::gly_frame_request_set_scale as *const (),
+        super::gly_frame_request_set_loop_animation as *const (),
+        super::gly_frame_get_width as *const (),
+        super::gly_frame_get_height as *const (),
+        super::gly_frame_get_stride as *const (),
+        super::gly_frame_get_memory_format as *const (),
+        super::gly_frame_get_delay as *const (),
+        super::gly_frame_get_buf_bytes as *const (),
+        super::gly_memory_format_has_alpha as *const (),
+        super::gly_memory_format_is_premultiplied as *const (),
+        super::gly_creator_new as *const (),
+        super::gly_creator_add_frame as *const (),
+        super::gly_creator_add_frame_with_stride as *const (),
+        super::gly_creator_add_metadata_key_value as *const (),
+        super::gly_creator_set_encoding_quality as *const (),
+        super::gly_creator_set_encoding_compression as *const (),
+        super::gly_creator_set_sandbox_selector as *const (),
+        super::gly_creator_create as *const (),
+        super::gly_new_frame_set_color_icc_profile as *const (),
+        super::gly_encoded_image_get_data as *const (),
+        super::cicp::gly_cicp_copy as *const (),
+        super::cicp::gly_cicp_free as *const (),
+        super::cicp::gly_frame_get_color_cicp as *const (),
+        super::gtypes::gly_memory_format_get_type as *const (),
+        super::gtypes::gly_sandbox_selector_get_type as *const (),
+        super::gtypes::gly_loader_error_get_type as *const (),
+        super::gtypes::gly_memory_format_selection_get_type as *const (),
+        super::gtypes::gly_loader_get_type as *const (),
+        super::gtypes::gly_image_get_type as *const (),
+        super::gtypes::gly_frame_get_type as *const (),
+        super::gtypes::gly_frame_request_get_type as *const (),
+        super::gtypes::gly_creator_get_type as *const (),
+        super::gtypes::gly_encoded_image_get_type as *const (),
+        super::gtypes::gly_new_frame_get_type as *const (),
+        super::gtypes::gly_cicp_get_type as *const (),
+        super::asyncops::gly_loader_load_async as *const (),
+        super::asyncops::gly_loader_load_finish as *const (),
+        super::asyncops::gly_image_next_frame_async as *const (),
+        super::asyncops::gly_image_next_frame_finish as *const (),
+        super::asyncops::gly_image_get_specific_frame_async as *const (),
+        super::asyncops::gly_image_get_specific_frame_finish as *const (),
+        super::asyncops::gly_creator_create_async as *const (),
+        super::asyncops::gly_creator_create_finish as *const (),
+        super::mimelist::gly_loader_get_mime_types as *const (),
+        super::mimelist::gly_loader_get_mime_types_async as *const (),
+        super::mimelist::gly_loader_get_mime_types_finish as *const (),
+        ]
+    }
+
+    #[test]
+    fn exports_full_libglycin2_surface() {
+        let exports = exports();
+        assert_eq!(exports.len(), 63, "expected 63 gly_* exports");
+        assert!(exports.iter().all(|&addr| !addr.is_null()));
+    }
 }

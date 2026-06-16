@@ -4,6 +4,7 @@
 //! `Drop` impls call the matching `glycin_ng_*_free` so freeing the
 //! GObject also tears down the underlying handle.
 
+use std::ffi::CString;
 use std::sync::{Arc, Mutex};
 
 use crate::ngapi::{self, GlycinNgEncodedImage, GlycinNgEncoder, GlycinNgImage, GlycinNgLoader};
@@ -103,6 +104,10 @@ pub(crate) struct ImageState {
     pub(crate) cursor: Mutex<usize>,
     pub(crate) frame_count: usize,
     pub(crate) rerender: Option<Rerender>,
+    /// Detected MIME type, cached so `gly_image_get_mime_type` can
+    /// hand back a stable `const char*` owned by the image. `None`
+    /// when the format has no MIME mapping.
+    pub(crate) mime: Option<CString>,
 }
 
 unsafe impl Send for ImageState {}
@@ -113,12 +118,14 @@ impl ImageState {
         image: *mut GlycinNgImage,
         frame_count: usize,
         rerender: Option<Rerender>,
+        mime: Option<CString>,
     ) -> Self {
         Self {
             inner: image,
             cursor: Mutex::new(0),
             frame_count,
             rerender,
+            mime,
         }
     }
 
