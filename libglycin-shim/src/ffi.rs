@@ -125,6 +125,11 @@ unsafe extern "C" {
 
     pub fn g_file_get_path(file: *mut GFile) -> *mut c_char;
     pub fn g_file_get_uri(file: *mut GFile) -> *mut c_char;
+    pub fn g_file_read(
+        file: *mut GFile,
+        cancellable: *mut c_void,
+        error: *mut *mut GError,
+    ) -> *mut GInputStream;
 
     pub fn g_bytes_get_data(bytes: *mut GBytes, size: *mut usize) -> *const c_void;
     pub fn g_bytes_new(data: *const c_void, size: usize) -> *mut GBytes;
@@ -234,6 +239,13 @@ mod test_stubs {
         std::ptr::null_mut()
     }
     pub unsafe extern "C" fn g_file_get_uri(_: *mut GFile) -> *mut c_char {
+        std::ptr::null_mut()
+    }
+    pub unsafe extern "C" fn g_file_read(
+        _: *mut GFile,
+        _: *mut c_void,
+        _: *mut *mut GError,
+    ) -> *mut GInputStream {
         std::ptr::null_mut()
     }
     pub unsafe extern "C" fn g_bytes_get_data(_: *mut GBytes, _: *mut usize) -> *const c_void {

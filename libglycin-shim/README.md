@@ -85,7 +85,7 @@ unused once the shim is in place and can be removed.
 
 | Symbol                                                                 | Behavior                                                          |
 |------------------------------------------------------------------------|-------------------------------------------------------------------|
-| `gly_loader_new`                                                       | path-backed `GFile` (non-native files return `NULL`)              |
+| `gly_loader_new`                                                       | native files read from disk; other `GFile`s (URIs) read via GIO   |
 | `gly_loader_new_for_bytes`                                             | in-memory buffer                                                  |
 | `gly_loader_new_for_stream`                                            | whole stream read into memory before decode                       |
 | `gly_loader_set_sandbox_selector`                                      | accepted, ignored (see below)                                     |

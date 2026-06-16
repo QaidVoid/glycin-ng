@@ -123,21 +123,30 @@ pub unsafe extern "C" fn gly_loader_new(file: *mut GFile) -> *mut GObject {
     if file.is_null() {
         return ptr::null_mut();
     }
+    // Fast path: a native, path-backed file is read straight from
+    // disk without going through GIO.
     let path_ptr = unsafe { ffi::g_file_get_path(file) };
-    if path_ptr.is_null() {
-        // Non-native GFile (e.g. URI not on disk). We don't yet
-        // resolve those; the caller will get a NULL handle.
+    if !path_ptr.is_null() {
+        let path_owned = unsafe { CStr::from_ptr(path_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { ffi::g_free(path_ptr as *mut c_void) };
+        if let Ok(bytes) = std::fs::read(&path_owned) {
+            return new_loader_from_bytes(bytes);
+        }
+    }
+    // Fallback: read any other GFile (URIs, GVfs mounts) through GIO.
+    let mut err: *mut GError = ptr::null_mut();
+    let stream = unsafe { ffi::g_file_read(file, ptr::null_mut(), &mut err) };
+    if stream.is_null() {
         return ptr::null_mut();
     }
-    let path_owned = unsafe { CStr::from_ptr(path_ptr) }
-        .to_string_lossy()
-        .into_owned();
-    unsafe { ffi::g_free(path_ptr as *mut c_void) };
-    let bytes = match std::fs::read(&path_owned) {
-        Ok(b) => b,
-        Err(_) => return ptr::null_mut(),
-    };
-    new_loader_from_bytes(bytes)
+    let bytes = unsafe { read_input_stream(stream as *mut GInputStream) };
+    unsafe { ffi::g_object_unref(stream as *mut c_void) };
+    match bytes {
+        Some(b) => new_loader_from_bytes(b),
+        None => ptr::null_mut(),
+    }
 }
 
 /// # Safety
@@ -163,6 +172,18 @@ pub unsafe extern "C" fn gly_loader_new_for_stream(stream: *mut GInputStream) ->
     if stream.is_null() {
         return ptr::null_mut();
     }
+    match unsafe { read_input_stream(stream) } {
+        Some(buf) => new_loader_from_bytes(buf),
+        None => ptr::null_mut(),
+    }
+}
+
+/// Read a `GInputStream` to end into a buffer, or `None` on read
+/// error.
+///
+/// # Safety
+/// `stream` must be a valid `GInputStream`.
+unsafe fn read_input_stream(stream: *mut GInputStream) -> Option<Vec<u8>> {
     let mut buf = Vec::<u8>::new();
     let mut chunk = vec![0u8; 65536];
     loop {
@@ -177,14 +198,14 @@ pub unsafe extern "C" fn gly_loader_new_for_stream(stream: *mut GInputStream) ->
             )
         };
         if n < 0 {
-            return ptr::null_mut();
+            return None;
         }
         if n == 0 {
             break;
         }
         buf.extend_from_slice(&chunk[..n as usize]);
     }
-    new_loader_from_bytes(buf)
+    Some(buf)
 }
 
 fn new_loader_from_bytes(bytes: Vec<u8>) -> *mut GObject {
@@ -632,15 +653,12 @@ pub unsafe extern "C" fn gly_frame_get_memory_format(frame: *mut GObject) -> c_i
 /// `frame` must be valid or NULL.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_frame_get_delay(frame: *mut GObject) -> i64 {
+    // Microseconds, matching upstream. A frame with no delay reports
+    // 0 (upstream's `delay().unwrap_or_default().as_micros()`).
     let Some(state) = (unsafe { state_ref::<FrameState>(frame) }) else {
-        return -1;
+        return 0;
     };
-    if state.frame.delay_ms == 0 {
-        -1
-    } else {
-        // glycin's API documents the unit as microseconds.
-        (state.frame.delay_ms as i64).saturating_mul(1000)
-    }
+    (state.frame.delay_ms as i64).saturating_mul(1000)
 }
 
 /// # Safety
