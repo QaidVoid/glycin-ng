@@ -1,15 +1,15 @@
 //! `GlyCicp` boxed type and the frame color accessor.
 //!
-//! `GlyCicp` carries ITU-T H.273 coding-independent code points. The
-//! engine does not yet surface CICP, so `gly_frame_get_color_cicp`
-//! reports `NULL`, which upstream defines as "no CICP used". The
-//! boxed copy and free entry points are implemented fully so callers
-//! and `g_boxed_*` machinery behave correctly once CICP data exists.
+//! `GlyCicp` carries ITU-T H.273 coding-independent code points.
+//! `gly_frame_get_color_cicp` reports the CICP the engine extracted
+//! for the frame's image, or `NULL` when none is present, which
+//! upstream defines as "no CICP used".
 
 use std::ffi::c_void;
 use std::ptr;
 
 use crate::ffi::{self, GObject};
+use crate::types::FrameState;
 
 /// ITU-T H.273 coding-independent code points for a frame's color.
 #[repr(C)]
@@ -50,11 +50,28 @@ pub unsafe extern "C" fn gly_cicp_free(cicp: *mut GlyCicp) {
     }
 }
 
-/// Return the frame's CICP, or `NULL` when no CICP applies.
+/// Return the frame's CICP, or `NULL` when no CICP applies. The
+/// returned pointer is owned by the caller and freed with
+/// [`gly_cicp_free`].
 ///
 /// # Safety
 /// `frame` must be valid or NULL.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn gly_frame_get_color_cicp(_frame: *mut GObject) -> *mut GlyCicp {
-    ptr::null_mut()
+pub unsafe extern "C" fn gly_frame_get_color_cicp(frame: *mut GObject) -> *mut GlyCicp {
+    let Some(bytes) = (unsafe { crate::state_ref::<FrameState>(frame) }).and_then(|s| s.cicp) else {
+        return ptr::null_mut();
+    };
+    let cicp = unsafe { ffi::g_malloc0(size_of::<GlyCicp>()) } as *mut GlyCicp;
+    if cicp.is_null() {
+        return ptr::null_mut();
+    }
+    unsafe {
+        *cicp = GlyCicp {
+            color_primaries: bytes[0],
+            transfer_characteristics: bytes[1],
+            matrix_coefficients: bytes[2],
+            video_full_range_flag: bytes[3],
+        };
+    }
+    cicp
 }

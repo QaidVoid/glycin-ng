@@ -126,6 +126,12 @@ const GlycinNgTexture* glycin_ng_image_texture(const GlycinNgImage* image,
                                                size_t index);
 uint64_t glycin_ng_image_frame_delay_ms(const GlycinNgImage* image,
                                         size_t index);
+size_t glycin_ng_image_metadata_key_count(const GlycinNgImage* image);
+const char* glycin_ng_image_metadata_key_at(const GlycinNgImage* image,
+                                            size_t index);
+const char* glycin_ng_image_metadata_value(const GlycinNgImage* image,
+                                           const char* key);
+int glycin_ng_image_cicp(const GlycinNgImage* image, uint8_t* out);
 
 /* Texture accessors. */
 uint32_t glycin_ng_texture_width(const GlycinNgTexture* texture);

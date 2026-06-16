@@ -19,7 +19,9 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     let mut decoder =
         png::Decoder::new_with_limits(Cursor::new(bytes), png::Limits { bytes: max_bytes });
     decoder.set_transformations(Transformations::EXPAND);
-    decoder.set_ignore_text_chunk(true);
+    // Text chunks are only read when the metadata feature wants them;
+    // otherwise the decoder skips the allocation.
+    decoder.set_ignore_text_chunk(!cfg!(feature = "metadata"));
 
     let mut reader = decoder.read_info().map_err(map_err)?;
     let (out_color, out_depth) = reader.output_color_type();
@@ -93,9 +95,46 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     if let Some(e) = exif {
         image.set_exif(e);
     }
+    #[cfg(feature = "metadata")]
+    extract_metadata(&mut image, reader.info());
 
     let _ = opts.apply_transformations;
     Ok(image)
+}
+
+/// Project the PNG's text chunks and CICP code points onto the image.
+///
+/// Keys come from `tEXt`, `zTXt`, and `iTXt` chunks; the four CICP
+/// bytes come from the `cICP` chunk. Both are read directly from the
+/// `png` crate, so no separate metadata parser is needed.
+#[cfg(feature = "metadata")]
+fn extract_metadata(image: &mut Image, info: &png::Info) {
+    use std::collections::BTreeMap;
+
+    let mut map = BTreeMap::new();
+    for chunk in &info.uncompressed_latin1_text {
+        map.insert(chunk.keyword.clone(), chunk.text.clone());
+    }
+    for chunk in &info.compressed_latin1_text {
+        if let Ok(text) = chunk.get_text() {
+            map.insert(chunk.keyword.clone(), text);
+        }
+    }
+    for chunk in &info.utf8_text {
+        if let Ok(text) = chunk.get_text() {
+            map.insert(chunk.keyword.clone(), text);
+        }
+    }
+    image.set_metadata_key_value(map);
+
+    if let Some(cicp) = info.coding_independent_code_points {
+        image.set_cicp([
+            cicp.color_primaries,
+            cicp.transfer_function,
+            cicp.matrix_coefficients,
+            cicp.is_video_full_range_image as u8,
+        ]);
+    }
 }
 
 fn map_format(color: ColorType, depth: BitDepth) -> Option<MemoryFormat> {
