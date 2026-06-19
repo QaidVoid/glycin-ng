@@ -13,7 +13,7 @@ categories = ["encoding", "multimedia::images"]
 members = [".", "c-api", "libglycin-shim"]
 
 [workspace.package]
-version = "0.2.3"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.87"
 license = "MIT OR Apache-2.0"

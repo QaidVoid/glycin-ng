@@ -468,7 +468,7 @@ dependencies = [
 
 [[package]]
 name = "glycin-ng"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "base64",
  "criterion",
@@ -491,14 +491,14 @@ dependencies = [
 
 [[package]]
 name = "glycin-ng-c"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "glycin-ng",
 ]
 
 [[package]]
 name = "glycin-ng-libglycin-shim"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "bitflags",
  "libc",

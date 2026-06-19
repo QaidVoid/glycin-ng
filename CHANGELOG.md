@@ -1,4 +1,16 @@
 
+## 0.3.0 — 2026-06-19
+
+### Bug Fixes
+
+- Return straight alpha from svg decoder (#9)
+- **shim:** Match upstream for frame delay and non-native files (#13)
+
+### Features
+
+- Extract image metadata and CICP from the PNG decoder (#12)
+- **shim:** Implement all missing libglycin-2 symbols (#11)
+
 ## 0.2.3 — 2026-06-07
 
 ### Features
