@@ -98,7 +98,7 @@ impl KnownFormat {
             | "image/x-portable-bitmap"
             | "image/x-portable-graymap"
             | "image/x-portable-pixmap" => Some(Self::Pnm),
-            "image/vnd-ms.dds" | "image/x-dds" => Some(Self::Dds),
+            "image/vnd.ms-dds" | "image/vnd-ms.dds" | "image/x-dds" => Some(Self::Dds),
             "image/jxl" => Some(Self::Jxl),
             "image/svg+xml" => Some(Self::Svg),
             _ => None,
@@ -280,6 +280,17 @@ mod tests {
     #[test]
     fn detects_dds() {
         assert_eq!(detect(b"DDS \0\0\0\0..."), Some(KnownFormat::Dds));
+    }
+
+    #[test]
+    fn dds_mime_aliases_resolve() {
+        for mime in ["image/vnd.ms-dds", "image/vnd-ms.dds", "image/x-dds"] {
+            assert_eq!(
+                KnownFormat::from_mime_type(mime),
+                Some(KnownFormat::Dds),
+                "{mime} should map to Dds"
+            );
+        }
     }
 
     #[test]
