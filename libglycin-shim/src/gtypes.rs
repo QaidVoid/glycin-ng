@@ -157,16 +157,34 @@ macro_rules! get_type_fn {
     };
 }
 
-get_type_fn!(gly_memory_format_get_type, register_enum(c"GlyMemoryFormat", MEMORY_FORMAT_VALUES));
-get_type_fn!(gly_sandbox_selector_get_type, register_enum(c"GlySandboxSelector", SANDBOX_SELECTOR_VALUES));
-get_type_fn!(gly_loader_error_get_type, register_enum(c"GlyLoaderError", LOADER_ERROR_VALUES));
-get_type_fn!(gly_memory_format_selection_get_type, register_flags(c"GlyMemoryFormatSelection", MEMORY_FORMAT_SELECTION_VALUES));
+get_type_fn!(
+    gly_memory_format_get_type,
+    register_enum(c"GlyMemoryFormat", MEMORY_FORMAT_VALUES)
+);
+get_type_fn!(
+    gly_sandbox_selector_get_type,
+    register_enum(c"GlySandboxSelector", SANDBOX_SELECTOR_VALUES)
+);
+get_type_fn!(
+    gly_loader_error_get_type,
+    register_enum(c"GlyLoaderError", LOADER_ERROR_VALUES)
+);
+get_type_fn!(
+    gly_memory_format_selection_get_type,
+    register_flags(c"GlyMemoryFormatSelection", MEMORY_FORMAT_SELECTION_VALUES)
+);
 get_type_fn!(gly_loader_get_type, register_gobject(c"GlyLoader"));
 get_type_fn!(gly_image_get_type, register_gobject(c"GlyImage"));
 get_type_fn!(gly_frame_get_type, register_gobject(c"GlyFrame"));
-get_type_fn!(gly_frame_request_get_type, register_gobject(c"GlyFrameRequest"));
+get_type_fn!(
+    gly_frame_request_get_type,
+    register_gobject(c"GlyFrameRequest")
+);
 get_type_fn!(gly_creator_get_type, register_gobject(c"GlyCreator"));
-get_type_fn!(gly_encoded_image_get_type, register_gobject(c"GlyEncodedImage"));
+get_type_fn!(
+    gly_encoded_image_get_type,
+    register_gobject(c"GlyEncodedImage")
+);
 get_type_fn!(gly_new_frame_get_type, register_gobject(c"GlyNewFrame"));
 
 /// # Safety
@@ -234,9 +252,18 @@ mod tests {
         assert_eq!(name(LOADER_ERROR_VALUES[2].value_nick), "no-more-frames");
         assert_eq!(name(SANDBOX_SELECTOR_VALUES[2].value_name), "FlatpakSpawn");
         assert_eq!(name(SANDBOX_SELECTOR_VALUES[2].value_nick), "flatpak-spawn");
-        assert_eq!(name(MEMORY_FORMAT_VALUES[0].value_name), "B8g8r8a8Premultiplied");
-        assert_eq!(name(MEMORY_FORMAT_VALUES[0].value_nick), "b8g8r8a8-premultiplied");
-        assert_eq!(name(MEMORY_FORMAT_VALUES[15].value_name), "R32g32b32a32FloatPremultiplied");
+        assert_eq!(
+            name(MEMORY_FORMAT_VALUES[0].value_name),
+            "B8g8r8a8Premultiplied"
+        );
+        assert_eq!(
+            name(MEMORY_FORMAT_VALUES[0].value_nick),
+            "b8g8r8a8-premultiplied"
+        );
+        assert_eq!(
+            name(MEMORY_FORMAT_VALUES[15].value_name),
+            "R32g32b32a32FloatPremultiplied"
+        );
         assert_eq!(
             name(MEMORY_FORMAT_SELECTION_VALUES[12].value_name),
             "R16g16b16Float"

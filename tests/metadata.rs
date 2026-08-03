@@ -11,7 +11,9 @@ const CICP_PNG: &[u8] = include_bytes!("data/cicp.png");
 
 #[test]
 fn text_chunk_becomes_key_value() {
-    let image = Loader::new_bytes(TEXT_METADATA_PNG.to_vec()).load().unwrap();
+    let image = Loader::new_bytes(TEXT_METADATA_PNG.to_vec())
+        .load()
+        .unwrap();
     let map = image
         .metadata_key_value()
         .expect("png tEXt chunk should yield key/value metadata");
@@ -32,6 +34,8 @@ fn cicp_chunk_is_extracted() {
 
 #[test]
 fn image_without_cicp_reports_none() {
-    let image = Loader::new_bytes(TEXT_METADATA_PNG.to_vec()).load().unwrap();
+    let image = Loader::new_bytes(TEXT_METADATA_PNG.to_vec())
+        .load()
+        .unwrap();
     assert!(image.cicp().is_none());
 }

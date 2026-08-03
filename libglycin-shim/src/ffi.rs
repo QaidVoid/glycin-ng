@@ -189,8 +189,10 @@ unsafe extern "C" {
         instance_init: gpointer,
         flags: c_uint,
     ) -> GType;
-    pub fn g_enum_register_static(name: *const c_char, const_static_values: *const GEnumValue)
-    -> GType;
+    pub fn g_enum_register_static(
+        name: *const c_char,
+        const_static_values: *const GEnumValue,
+    ) -> GType;
     pub fn g_flags_register_static(
         name: *const c_char,
         const_static_values: *const GFlagsValue,

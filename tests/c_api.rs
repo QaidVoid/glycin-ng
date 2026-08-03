@@ -49,10 +49,7 @@ unsafe extern "C" {
     fn glycin_ng_image_orientation(image: *const GlycinNgImage) -> u16;
     fn glycin_ng_image_format_name(image: *const GlycinNgImage) -> *const c_char;
     fn glycin_ng_image_metadata_key_count(image: *const GlycinNgImage) -> usize;
-    fn glycin_ng_image_metadata_key_at(
-        image: *const GlycinNgImage,
-        index: usize,
-    ) -> *const c_char;
+    fn glycin_ng_image_metadata_key_at(image: *const GlycinNgImage, index: usize) -> *const c_char;
     fn glycin_ng_image_metadata_value(
         image: *const GlycinNgImage,
         key: *const c_char,

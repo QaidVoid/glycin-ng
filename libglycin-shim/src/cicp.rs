@@ -58,7 +58,8 @@ pub unsafe extern "C" fn gly_cicp_free(cicp: *mut GlyCicp) {
 /// `frame` must be valid or NULL.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_frame_get_color_cicp(frame: *mut GObject) -> *mut GlyCicp {
-    let Some(bytes) = (unsafe { crate::state_ref::<FrameState>(frame) }).and_then(|s| s.cicp) else {
+    let Some(bytes) = (unsafe { crate::state_ref::<FrameState>(frame) }).and_then(|s| s.cicp)
+    else {
         return ptr::null_mut();
     };
     let cicp = unsafe { ffi::g_malloc0(size_of::<GlyCicp>()) } as *mut GlyCicp;

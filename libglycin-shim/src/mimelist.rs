@@ -18,8 +18,7 @@ use crate::mime::SUPPORTED_MIME_TYPES;
 /// types.
 fn build_strv() -> GStrv {
     let slots = SUPPORTED_MIME_TYPES.len() + 1;
-    let arr =
-        unsafe { ffi::g_malloc(slots * size_of::<*mut c_char>()) } as *mut *mut c_char;
+    let arr = unsafe { ffi::g_malloc(slots * size_of::<*mut c_char>()) } as *mut *mut c_char;
     if arr.is_null() {
         return ptr::null_mut();
     }
@@ -47,8 +46,7 @@ pub unsafe extern "C" fn gly_loader_get_mime_types_async(
     callback: GAsyncReadyCallback,
     user_data: gpointer,
 ) {
-    let task =
-        unsafe { ffi::g_task_new(ptr::null_mut(), cancellable, callback, user_data) };
+    let task = unsafe { ffi::g_task_new(ptr::null_mut(), cancellable, callback, user_data) };
     unsafe { ffi::g_task_run_in_thread(task, Some(mime_types_thread)) };
     unsafe { ffi::g_object_unref(task as *mut c_void) };
 }

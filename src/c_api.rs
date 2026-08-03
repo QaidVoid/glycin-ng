@@ -63,7 +63,10 @@ impl GlycinNgImage {
             .map(|map| {
                 map.iter()
                     .filter_map(|(k, v)| {
-                        Some((CString::new(k.as_str()).ok()?, CString::new(v.as_str()).ok()?))
+                        Some((
+                            CString::new(k.as_str()).ok()?,
+                            CString::new(v.as_str()).ok()?,
+                        ))
                     })
                     .collect()
             })
