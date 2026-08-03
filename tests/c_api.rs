@@ -9,8 +9,8 @@ use std::ffi::{CStr, c_char, c_uint};
 use std::ptr;
 
 use glycin_ng::c_api::{
-    GLYCIN_NG_FORMAT_R8G8B8A8, GLYCIN_NG_KFMT_PNG, GlycinNgEncodedImage, GlycinNgEncoder,
-    GlycinNgImage, GlycinNgLoader,
+    GLYCIN_NG_FORMAT_R8G8B8A8, GLYCIN_NG_KFMT_JPEG, GLYCIN_NG_KFMT_PNG, GlycinNgEncodedImage,
+    GlycinNgEncoder, GlycinNgImage, GlycinNgLoader,
 };
 
 #[allow(improper_ctypes)]
@@ -256,6 +256,46 @@ fn encoder_round_trip_png_through_c_api() {
     assert_eq!(decoded, &pixels[..]);
 
     unsafe { glycin_ng_image_free(image) };
+    unsafe { glycin_ng_encoded_image_free(encoded) };
+    unsafe { glycin_ng_encoder_free(enc) };
+}
+
+#[cfg(feature = "encode")]
+#[test]
+fn encoder_jpeg_accepts_rgba_through_c_api() {
+    let width: u32 = 2;
+    let height: u32 = 1;
+    let pixels: [u8; 8] = [
+        10, 20, 30, 255,
+        40, 50, 60, 0,
+    ];
+
+    let enc = unsafe { glycin_ng_encoder_new(GLYCIN_NG_KFMT_JPEG) };
+    assert!(!enc.is_null(), "encoder_new returned NULL");
+
+    let rc = unsafe {
+        glycin_ng_encoder_add_frame(
+            enc,
+            width,
+            height,
+            width * 4,
+            GLYCIN_NG_FORMAT_R8G8B8A8,
+            pixels.as_ptr(),
+            pixels.len(),
+        )
+    };
+    assert_eq!(rc, 0, "add_frame failed");
+
+    let encoded = unsafe { glycin_ng_encoder_encode(enc) };
+    assert!(!encoded.is_null(), "encode returned NULL");
+
+    let out_ptr = unsafe { glycin_ng_encoded_image_data(encoded) };
+    let out_len = unsafe { glycin_ng_encoded_image_len(encoded) };
+    assert!(!out_ptr.is_null());
+    assert!(out_len > 0);
+    let out = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+    assert_eq!(&out[..2], &[0xFF, 0xD8], "output is not a JPEG");
+
     unsafe { glycin_ng_encoded_image_free(encoded) };
     unsafe { glycin_ng_encoder_free(enc) };
 }

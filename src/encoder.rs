@@ -194,11 +194,12 @@ fn encode_dispatch(cfg: &Encoder, rgba: &[u8], width: u32, height: u32) -> Resul
             enc.write_image(rgba, width, height, ECT::Rgba8)
         }
         KnownFormat::Jpeg => {
+            let rgb = rgba8_to_rgb8(rgba, width, height);
             let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, cfg.quality);
             if let Some(p) = cfg.icc_profile.as_ref() {
                 let _ = enc.set_icc_profile(p.clone());
             }
-            enc.write_image(rgba, width, height, ECT::Rgba8)
+            enc.write_image(&rgb, width, height, ECT::Rgb8)
         }
         KnownFormat::Gif => {
             let mut enc = image::codecs::gif::GifEncoder::new(&mut out);
@@ -296,6 +297,20 @@ fn to_rgba8(
         }
     }
     Ok(out)
+}
+
+fn rgba8_to_rgb8(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let n = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|n| n.checked_mul(3))
+        .unwrap_or(0);
+    let mut out = Vec::with_capacity(n);
+    for px in rgba.chunks_exact(4) {
+        let (r, g, b, a) = (px[0] as u32, px[1] as u32, px[2] as u32, px[3] as u32);
+        let over_white = |c: u32| ((c * a + 255 * (255 - a)) / 255) as u8;
+        out.extend_from_slice(&[over_white(r), over_white(g), over_white(b)]);
+    }
+    out
 }
 
 fn sample_rgba8(fmt: MemoryFormat, p: &[u8]) -> Option<(u8, u8, u8, u8)> {
@@ -399,6 +414,32 @@ mod tests {
             to_rgba8(&data, 4, 4, 8, MemoryFormat::R8g8b8),
             Err(Error::Malformed(_))
         ));
+    }
+
+    #[test]
+    fn rgba8_to_rgb8_composites_alpha_over_white() {
+        // Fully opaque pixel passes through unchanged.
+        assert_eq!(rgba8_to_rgb8(&[10, 20, 30, 255], 1, 1), vec![10, 20, 30]);
+        // Fully transparent pixel becomes white.
+        assert_eq!(rgba8_to_rgb8(&[10, 20, 30, 0], 1, 1), vec![255, 255, 255]);
+        // Half-transparent red over white: (255*128 + 255*127)/255
+        // = 255 for red, (0 + 255*127)/255 = 127 for green/blue.
+        assert_eq!(rgba8_to_rgb8(&[255, 0, 0, 128], 1, 1), vec![255, 127, 127]);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn jpeg_accepts_rgba_source() {
+        let mut enc = Encoder::new(KnownFormat::Jpeg).unwrap();
+        enc.add_frame(EncodeFrame {
+            width: 2,
+            height: 1,
+            stride: 8,
+            format: MemoryFormat::R8g8b8a8,
+            data: vec![10, 20, 30, 255, 40, 50, 60, 0],
+        });
+        let bytes = enc.encode().expect("jpeg encode of rgba should succeed");
+        assert_eq!(&bytes[..2], &[0xFF, 0xD8]);
     }
 
     #[cfg(feature = "encode")]
