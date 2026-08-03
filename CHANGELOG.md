@@ -1,4 +1,14 @@
 
+## 0.3.2 — 2026-08-03
+
+### Bug Fixes
+
+- **encoder:** Do not pass alpha channel to jpg (#16)
+
+### Performance
+
+- **encoder:** Flatten jpeg alpha without a second buffer
+
 ## 0.3.1 — 2026-07-08
 
 ### Bug Fixes
