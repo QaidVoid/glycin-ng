@@ -152,7 +152,7 @@ impl Encoder {
             frame.stride,
             frame.format,
         )?;
-        encode_dispatch(self, &rgba, frame.width, frame.height)
+        encode_dispatch(self, rgba, frame.width, frame.height)
     }
 
     /// Drop any frames previously added with [`Encoder::add_frame`].
@@ -183,7 +183,7 @@ fn is_supported(_target: KnownFormat) -> bool {
 }
 
 #[cfg(feature = "encode")]
-fn encode_dispatch(cfg: &Encoder, rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+fn encode_dispatch(cfg: &Encoder, rgba: Vec<u8>, width: u32, height: u32) -> Result<Vec<u8>> {
     let mut out = Cursor::new(Vec::new());
     let result = match cfg.target {
         KnownFormat::Png => {
@@ -191,10 +191,10 @@ fn encode_dispatch(cfg: &Encoder, rgba: &[u8], width: u32, height: u32) -> Resul
             if let Some(p) = cfg.icc_profile.as_ref() {
                 let _ = enc.set_icc_profile(p.clone());
             }
-            enc.write_image(rgba, width, height, ECT::Rgba8)
+            enc.write_image(&rgba, width, height, ECT::Rgba8)
         }
         KnownFormat::Jpeg => {
-            let rgb = rgba8_to_rgb8(rgba, width, height);
+            let rgb = flatten_over_white(rgba);
             let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, cfg.quality);
             if let Some(p) = cfg.icc_profile.as_ref() {
                 let _ = enc.set_icc_profile(p.clone());
@@ -203,7 +203,7 @@ fn encode_dispatch(cfg: &Encoder, rgba: &[u8], width: u32, height: u32) -> Resul
         }
         KnownFormat::Gif => {
             let mut enc = image::codecs::gif::GifEncoder::new(&mut out);
-            enc.encode(rgba, width, height, ECT::Rgba8)
+            enc.encode(&rgba, width, height, ECT::Rgba8)
         }
         KnownFormat::WebP => {
             // image 0.25 only ships the lossless WebP encoder; the
@@ -213,15 +213,15 @@ fn encode_dispatch(cfg: &Encoder, rgba: &[u8], width: u32, height: u32) -> Resul
             if let Some(p) = cfg.icc_profile.as_ref() {
                 let _ = enc.set_icc_profile(p.clone());
             }
-            enc.write_image(rgba, width, height, ECT::Rgba8)
+            enc.write_image(&rgba, width, height, ECT::Rgba8)
         }
         KnownFormat::Tiff => {
             let enc = image::codecs::tiff::TiffEncoder::new(&mut out);
-            enc.write_image(rgba, width, height, ECT::Rgba8)
+            enc.write_image(&rgba, width, height, ECT::Rgba8)
         }
         KnownFormat::Bmp => {
             let enc = image::codecs::bmp::BmpEncoder::new(&mut out);
-            enc.write_image(rgba, width, height, ECT::Rgba8)
+            enc.write_image(&rgba, width, height, ECT::Rgba8)
         }
         _ => return Err(Error::UnsupportedFormat),
     };
@@ -233,7 +233,7 @@ fn encode_dispatch(cfg: &Encoder, rgba: &[u8], width: u32, height: u32) -> Resul
 }
 
 #[cfg(not(feature = "encode"))]
-fn encode_dispatch(_cfg: &Encoder, _rgba: &[u8], _width: u32, _height: u32) -> Result<Vec<u8>> {
+fn encode_dispatch(_cfg: &Encoder, _rgba: Vec<u8>, _width: u32, _height: u32) -> Result<Vec<u8>> {
     Err(Error::UnsupportedFormat)
 }
 
@@ -299,18 +299,36 @@ fn to_rgba8(
     Ok(out)
 }
 
-fn rgba8_to_rgb8(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
-    let n = (width as usize)
-        .checked_mul(height as usize)
-        .and_then(|n| n.checked_mul(3))
-        .unwrap_or(0);
-    let mut out = Vec::with_capacity(n);
-    for px in rgba.chunks_exact(4) {
-        let (r, g, b, a) = (px[0] as u32, px[1] as u32, px[2] as u32, px[3] as u32);
-        let over_white = |c: u32| ((c * a + 255 * (255 - a)) / 255) as u8;
-        out.extend_from_slice(&[over_white(r), over_white(g), over_white(b)]);
+/// Composite straight-alpha RGBA8 over an opaque white background,
+/// returning the same buffer rewritten as tightly packed RGB8.
+///
+/// JPEG carries no alpha channel, and the `image` crate's JPEG
+/// encoder rejects `Rgba8` outright, so transparency has to be
+/// resolved before encoding. White is the conventional flattening
+/// background and is deliberately not configurable.
+///
+/// Takes `buf` by value and compacts it in place, so peak memory
+/// stays at the size of the RGBA buffer rather than holding a second
+/// buffer three quarters as large beside it. The forward pass cannot
+/// clobber unread input: pixel `i` writes at most index `i * 3 + 2`,
+/// always below the next pixel's first read at `(i + 1) * 4`.
+#[cfg(feature = "encode")]
+fn flatten_over_white(mut buf: Vec<u8>) -> Vec<u8> {
+    let pixels = buf.len() / 4;
+    for i in 0..pixels {
+        let a = buf[i * 4 + 3] as u32;
+        let over_white = |c: u8| ((c as u32 * a + 255 * (255 - a) + 127) / 255) as u8;
+        let (r, g, b) = (
+            over_white(buf[i * 4]),
+            over_white(buf[i * 4 + 1]),
+            over_white(buf[i * 4 + 2]),
+        );
+        buf[i * 3] = r;
+        buf[i * 3 + 1] = g;
+        buf[i * 3 + 2] = b;
     }
-    out
+    buf.truncate(pixels * 3);
+    buf
 }
 
 fn sample_rgba8(fmt: MemoryFormat, p: &[u8]) -> Option<(u8, u8, u8, u8)> {
@@ -368,12 +386,14 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "encode")]
     #[test]
     fn encode_with_no_frames_is_internal_error() {
         let enc = Encoder::new(KnownFormat::Png).unwrap();
         assert!(matches!(enc.encode(), Err(Error::Internal(_))));
     }
 
+    #[cfg(feature = "encode")]
     #[test]
     fn encode_with_multiple_frames_is_internal_error() {
         let mut enc = Encoder::new(KnownFormat::Png).unwrap();
@@ -416,30 +436,63 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "encode")]
     #[test]
-    fn rgba8_to_rgb8_composites_alpha_over_white() {
+    fn flatten_over_white_composites_alpha() {
         // Fully opaque pixel passes through unchanged.
-        assert_eq!(rgba8_to_rgb8(&[10, 20, 30, 255], 1, 1), vec![10, 20, 30]);
+        assert_eq!(flatten_over_white(vec![10, 20, 30, 255]), [10, 20, 30]);
         // Fully transparent pixel becomes white.
-        assert_eq!(rgba8_to_rgb8(&[10, 20, 30, 0], 1, 1), vec![255, 255, 255]);
-        // Half-transparent red over white: (255*128 + 255*127)/255
-        // = 255 for red, (0 + 255*127)/255 = 127 for green/blue.
-        assert_eq!(rgba8_to_rgb8(&[255, 0, 0, 128], 1, 1), vec![255, 127, 127]);
+        assert_eq!(flatten_over_white(vec![10, 20, 30, 0]), [255, 255, 255]);
+        // Half-transparent red over white leaves red saturated and
+        // lifts the other channels halfway to 255.
+        assert_eq!(flatten_over_white(vec![255, 0, 0, 128]), [255, 127, 127]);
     }
 
     #[cfg(feature = "encode")]
     #[test]
-    fn jpeg_accepts_rgba_source() {
+    fn flatten_over_white_is_correct_across_overlapping_writes() {
+        // Four pixels, so the compacted RGB output overlaps input
+        // still waiting to be read. Anything but a correct forward
+        // pass corrupts the tail.
+        let buf = vec![
+            255, 0, 0, 255, // opaque red
+            0, 255, 0, 0, // transparent green
+            0, 0, 255, 128, // half-transparent blue
+            10, 20, 30, 64, // mostly transparent dark grey
+        ];
+        assert_eq!(
+            flatten_over_white(buf),
+            [255, 0, 0, 255, 255, 255, 127, 127, 255, 194, 196, 199]
+        );
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn jpeg_flattens_transparency_to_white() {
         let mut enc = Encoder::new(KnownFormat::Jpeg).unwrap();
+        enc.set_quality(100);
         enc.add_frame(EncodeFrame {
-            width: 2,
-            height: 1,
-            stride: 8,
+            width: 8,
+            height: 8,
+            stride: 32,
             format: MemoryFormat::R8g8b8a8,
-            data: vec![10, 20, 30, 255, 40, 50, 60, 0],
+            // Fully transparent black. Dropping alpha instead of
+            // compositing would decode back as black.
+            data: [0, 0, 0, 0].repeat(64),
         });
         let bytes = enc.encode().expect("jpeg encode of rgba should succeed");
         assert_eq!(&bytes[..2], &[0xFF, 0xD8]);
+
+        let decoded = image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg)
+            .expect("re-decode the encoded jpeg")
+            .to_rgb8();
+        for px in decoded.pixels() {
+            assert!(
+                px.0.iter().all(|&c| c >= 250),
+                "transparent input should flatten to white, got {:?}",
+                px.0
+            );
+        }
     }
 
     #[cfg(feature = "encode")]

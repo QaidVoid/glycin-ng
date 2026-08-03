@@ -265,10 +265,7 @@ fn encoder_round_trip_png_through_c_api() {
 fn encoder_jpeg_accepts_rgba_through_c_api() {
     let width: u32 = 2;
     let height: u32 = 1;
-    let pixels: [u8; 8] = [
-        10, 20, 30, 255,
-        40, 50, 60, 0,
-    ];
+    let pixels: [u8; 8] = [10, 20, 30, 255, 40, 50, 60, 0];
 
     let enc = unsafe { glycin_ng_encoder_new(GLYCIN_NG_KFMT_JPEG) };
     assert!(!enc.is_null(), "encoder_new returned NULL");
