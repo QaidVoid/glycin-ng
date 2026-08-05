@@ -221,6 +221,10 @@ cargo build --no-default-features --features decode,png,jpeg
 - [`glycin-ng-libglycin-shim`](libglycin-shim/) - `libglycin-2.so.0`
   drop-in for systems that have hard-linked against upstream's
   libglycin (Arch's gdk-pixbuf2 is the canonical case).
+- [`glycin-ng-librsvg-shim`](librsvg-shim/) - `librsvg-2.so.2`
+  drop-in replacing GNOME librsvg with the resvg-based SVG engine:
+  the full 55-symbol `rsvg_*` ABI, a real `RsvgHandle` GObject, and
+  none of librsvg's pango/harfbuzz/fontconfig/libxml2 closure.
 
 ## License
 
