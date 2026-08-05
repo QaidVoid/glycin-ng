@@ -10,7 +10,7 @@ keywords = ["decoder", "image", "landlock", "sandbox", "seccomp"]
 categories = ["encoding", "multimedia::images"]
 
 [workspace]
-members = [".", "c-api", "libglycin-shim"]
+members = [".", "c-api", "libglycin-shim", "librsvg-shim"]
 
 [workspace.package]
 version = "0.3.2"

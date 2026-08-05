@@ -507,6 +507,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "glycin-ng-librsvg-shim"
+version = "0.3.2"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,16 @@
+[package]
+name = "glycin-ng-librsvg-shim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "librsvg-2.so.2 compat shim that forwards to libglycin_ng.so"
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+name = "rsvg_2"
+path = "src/lib.rs"
+
+[dependencies]
+libc = "0.2"
