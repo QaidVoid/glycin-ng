@@ -244,6 +244,7 @@ fn stylesheet_and_dpi_setters_reparse() {
         0
     );
     let render = unsafe { glycin_ng_svg_render(svg, ptr::null(), 0, 20, 10, ptr::null(), 1) };
+    assert!(!render.is_null(), "{}", last_error());
     let data =
         unsafe { std::slice::from_raw_parts(glycin_ng_svg_render_data(render), 20 * 10 * 4) };
     assert_eq!(&data[0..4], &[255, 0, 0, 255]);

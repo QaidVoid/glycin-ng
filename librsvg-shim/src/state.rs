@@ -99,9 +99,14 @@ impl HandleState {
         }
     }
 
+    /// DPI handed to the engine, which carries a single value: the
+    /// horizontal axis wins, the vertical one is used when only it
+    /// was set, and [`DEFAULT_DPI`] covers neither being set.
     pub fn effective_dpi(&self) -> f64 {
         if self.dpi_x > 0.0 {
             self.dpi_x
+        } else if self.dpi_y > 0.0 {
+            self.dpi_y
         } else {
             DEFAULT_DPI
         }
@@ -116,22 +121,22 @@ impl HandleState {
 
     /// Directory used for resolving relative external references,
     /// derived from the base URI when it points into the
-    /// filesystem.
+    /// filesystem. File URIs with a hostname are rejected.
     pub fn resources_dir(&self) -> Option<CString> {
         let uri = self.base_uri.as_ref()?.to_str().ok()?;
-        let path = if let Some(rest) = uri.strip_prefix("file://") {
-            // Reject file URIs with a hostname; percent-decoding is
-            // limited to the common %20 case.
+        let path: Vec<u8> = if let Some(rest) = uri.strip_prefix("file://") {
             if !rest.starts_with('/') {
                 return None;
             }
-            rest.replace("%20", " ")
+            percent_decode(rest)?
         } else if uri.starts_with('/') {
-            uri.to_owned()
+            uri.as_bytes().to_vec()
         } else {
             return None;
         };
-        let dir = std::path::Path::new(&path).parent()?;
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::path::Path::new(std::ffi::OsStr::from_bytes(&path));
+        let dir = path.parent()?;
         CString::new(dir.as_os_str().as_encoded_bytes()).ok()
     }
 }
@@ -179,6 +184,25 @@ pub struct RsvgPositionData {
 pub struct RsvgLength {
     pub length: f64,
     pub unit: u32,
+}
+
+/// Decode `%XX` escapes in a URI path segment into raw bytes.
+fn percent_decode(s: &str) -> Option<Vec<u8>> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hi = (*bytes.get(i + 1)? as char).to_digit(16)?;
+            let lo = (*bytes.get(i + 2)? as char).to_digit(16)?;
+            out.push((hi * 16 + lo) as u8);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    Some(out)
 }
 
 /// Convert an `RsvgLength` to pixels, `None` for percentages (which
@@ -304,6 +328,17 @@ mod tests {
 
         state.base_uri = Some(CString::new("https://example.com/a.svg").unwrap());
         assert!(state.resources_dir().is_none());
+
+        // Percent-encoded UTF-8 and spaces decode fully.
+        state.base_uri = Some(CString::new("file:///tmp/My%20Bilder%C3%A4/x.svg").unwrap());
+        assert_eq!(
+            state.resources_dir().unwrap().as_bytes(),
+            "/tmp/My Bilder\u{e4}".as_bytes()
+        );
+
+        // Truncated escapes are rejected rather than mangled.
+        state.base_uri = Some(CString::new("file:///tmp/bad%2/x.svg").unwrap());
+        assert!(state.resources_dir().is_none());
     }
 
     #[test]
@@ -314,5 +349,10 @@ mod tests {
         assert_eq!(state.effective_dpi(), 96.0);
         state.dpi_x = -5.0;
         assert_eq!(state.effective_dpi(), DEFAULT_DPI);
+        // Only dpi-y set: it stands in for the single engine DPI.
+        state.dpi_y = 120.0;
+        assert_eq!(state.effective_dpi(), 120.0);
+        state.dpi_x = 96.0;
+        assert_eq!(state.effective_dpi(), 96.0);
     }
 }

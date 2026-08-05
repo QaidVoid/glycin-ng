@@ -222,6 +222,10 @@ unsafe fn render_layer_impl(
         gobject::set_gerror(error, "handle is NULL");
         return FALSE;
     };
+    if cr.is_null() {
+        gobject::set_gerror(error, "cairo context is NULL");
+        return FALSE;
+    }
     if viewport.is_null() {
         gobject::set_gerror(error, "viewport is NULL");
         return FALSE;
@@ -253,19 +257,24 @@ pub unsafe extern "C" fn rsvg_handle_render_element(
     element_viewport: *const RsvgRectangle,
     error: *mut *mut GError,
 ) -> gboolean {
+    // A NULL id means the whole document. Dispatched before taking the
+    // state borrow so the delegate does not alias it.
+    let Some(id) = (unsafe { id_cstring(id) }) else {
+        return unsafe { rsvg_handle_render_document(handle, cr, element_viewport, error) };
+    };
     let Some(state) = (unsafe { state_of(handle) }) else {
         gobject::set_gerror(error, "handle is NULL");
         return FALSE;
     };
+    if cr.is_null() {
+        gobject::set_gerror(error, "cairo context is NULL");
+        return FALSE;
+    }
     if element_viewport.is_null() {
         gobject::set_gerror(error, "element_viewport is NULL");
         return FALSE;
     }
     let viewport = unsafe { *element_viewport };
-    let Some(id) = (unsafe { id_cstring(id) }) else {
-        // A NULL id means the whole document.
-        return unsafe { rsvg_handle_render_document(handle, cr, element_viewport, error) };
-    };
     let Some(doc) = state.document() else {
         gobject::set_gerror(error, "handle is not fully loaded");
         return FALSE;

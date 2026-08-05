@@ -36,6 +36,16 @@ unsafe fn render_pixbuf(
         gobject::set_gerror(error, "document or target size is empty");
         return ptr::null_mut();
     }
+    // GdkPixbuf takes the rowstride as a gint, so reject sizes whose
+    // stride or total buffer would not fit before allocating.
+    let Some(expected) = (width as usize)
+        .checked_mul(4)
+        .filter(|stride| *stride <= c_int::MAX as usize)
+        .and_then(|stride| stride.checked_mul(height as usize))
+    else {
+        gobject::set_gerror(error, "requested pixbuf size is too large");
+        return ptr::null_mut();
+    };
     let transform = [width as f64 / dw, 0.0, 0.0, height as f64 / dh, 0.0, 0.0];
     let id_ptr: *const c_char = id.as_ref().map(|s| s.as_ptr()).unwrap_or(ptr::null());
     let render = unsafe {
@@ -55,6 +65,13 @@ unsafe fn render_pixbuf(
     }
     let len = unsafe { ngapi::glycin_ng_svg_render_len(render) };
     let src = unsafe { ngapi::glycin_ng_svg_render_data(render) };
+    // The pixbuf hands `width * 4 * height` bytes to its consumers, so
+    // a short buffer would be read out of bounds.
+    if len < expected || src.is_null() {
+        unsafe { ngapi::glycin_ng_svg_render_free(render) };
+        gobject::set_gerror(error, "engine returned a short pixel buffer");
+        return ptr::null_mut();
+    }
     let pixels = unsafe { ffi::g_malloc(len) };
     if pixels.is_null() {
         unsafe { ngapi::glycin_ng_svg_render_free(render) };

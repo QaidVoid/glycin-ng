@@ -154,6 +154,7 @@ unsafe extern "C" {
         flags: c_uint,
     ) -> GType;
     pub fn g_type_class_peek_parent(g_class: gpointer) -> gpointer;
+    pub fn g_type_check_instance_is_a(instance: gpointer, iface_type: GType) -> gboolean;
     pub fn g_enum_register_static(
         name: *const c_char,
         const_static_values: *const GEnumValue,
@@ -282,6 +283,9 @@ mod test_stubs {
     }
     pub unsafe extern "C" fn g_type_class_peek_parent(_: gpointer) -> gpointer {
         std::ptr::null_mut()
+    }
+    pub unsafe extern "C" fn g_type_check_instance_is_a(_: gpointer, _: GType) -> gboolean {
+        1
     }
     pub unsafe extern "C" fn g_enum_register_static(
         _: *const c_char,

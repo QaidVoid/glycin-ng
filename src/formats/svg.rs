@@ -290,11 +290,67 @@ pub(crate) struct IntrinsicDimensions {
     pub viewbox: Option<[f64; 4]>,
 }
 
+/// Gunzip SVGZ input so the raw-XML scans below see the document.
+/// usvg does the same transparently inside `Tree::from_data`.
+fn maybe_decompress(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        resvg::usvg::decompress_svgz(bytes).ok()
+    } else {
+        None
+    }
+}
+
+/// Whether the document references external files: any `href` (or
+/// `*:href`) attribute whose value is not a `data:` URI or a local
+/// `#fragment`. Used to keep the landlock layer enabled for the
+/// overwhelming majority of documents that never touch the
+/// filesystem.
+pub(crate) fn references_external_files(bytes: &[u8]) -> bool {
+    use quick_xml::events::Event;
+    use quick_xml::reader::Reader;
+
+    let decompressed;
+    let bytes = match maybe_decompress(bytes) {
+        Some(d) => {
+            decompressed = d;
+            &decompressed[..]
+        }
+        None => bytes,
+    };
+
+    let mut reader = Reader::from_reader(bytes);
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                for attr in e.attributes().with_checks(false).flatten() {
+                    let key = attr.key.as_ref();
+                    if key != b"href" && !key.ends_with(b":href") {
+                        continue;
+                    }
+                    let value = attr.value.as_ref();
+                    let value = value
+                        .iter()
+                        .position(|b| !b.is_ascii_whitespace())
+                        .map(|i| &value[i..])
+                        .unwrap_or(b"");
+                    if !value.is_empty() && !value.starts_with(b"#") && !value.starts_with(b"data:")
+                    {
+                        return true;
+                    }
+                }
+            }
+            Ok(Event::Eof) | Err(_) => return false,
+            _ => {}
+        }
+    }
+}
+
 /// Scan the root `<svg>` start tag for its sizing attributes.
 ///
 /// usvg resolves the root sizing to pixels during parsing; librsvg's
 /// `get_intrinsic_dimensions` needs the pre-resolution values with
-/// units, so they are read from the raw XML here.
+/// units, so they are read from the raw XML here (after gunzipping
+/// SVGZ input).
 pub(crate) fn intrinsic_dimensions(bytes: &[u8]) -> IntrinsicDimensions {
     use quick_xml::events::Event;
     use quick_xml::reader::Reader;
@@ -307,6 +363,15 @@ pub(crate) fn intrinsic_dimensions(bytes: &[u8]) -> IntrinsicDimensions {
         width: default,
         height: default,
         viewbox: None,
+    };
+
+    let decompressed;
+    let bytes = match maybe_decompress(bytes) {
+        Some(d) => {
+            decompressed = d;
+            &decompressed[..]
+        }
+        None => bytes,
     };
 
     let mut reader = Reader::from_reader(bytes);
@@ -358,7 +423,8 @@ fn parse_length(raw: &[u8]) -> Option<SvgLength> {
         ("ch", SvgUnit::Ch),
     ];
     for (suffix, unit) in UNITS {
-        if let Some(num) = s.strip_suffix(suffix) {
+        // CSS unit identifiers are case-insensitive.
+        if let Some(num) = strip_suffix_ignore_ascii_case(s, suffix) {
             let mut value: f64 = num.trim_end().parse().ok()?;
             if *unit == SvgUnit::Percent {
                 value /= 100.0;
@@ -371,6 +437,12 @@ fn parse_length(raw: &[u8]) -> Option<SvgLength> {
         value,
         unit: SvgUnit::Px,
     })
+}
+
+fn strip_suffix_ignore_ascii_case<'a>(s: &'a str, suffix: &str) -> Option<&'a str> {
+    let split = s.len().checked_sub(suffix.len())?;
+    let (head, tail) = s.split_at_checked(split)?;
+    tail.eq_ignore_ascii_case(suffix).then_some(head)
 }
 
 fn parse_viewbox(raw: &[u8]) -> Option<[f64; 4]> {
@@ -698,5 +770,71 @@ mod tests {
             }
         );
         assert_eq!(d.viewbox, None);
+
+        // CSS unit identifiers are case-insensitive.
+        let d = intrinsic_dimensions(br#"<svg width="10PX" height="4In"/>"#);
+        assert_eq!(
+            d.width,
+            SvgLength {
+                value: 10.0,
+                unit: SvgUnit::Px
+            }
+        );
+        assert_eq!(
+            d.height,
+            SvgLength {
+                value: 4.0,
+                unit: SvgUnit::In
+            }
+        );
+    }
+
+    /// Gzipped `<svg width="64pt" height="32"><rect .../></svg>`.
+    const SVGZ: &[u8] = &[
+        31, 139, 8, 0, 0, 0, 0, 0, 2, 255, 85, 204, 65, 10, 128, 32, 16, 64, 209, 171, 200, 28,
+        192, 17, 139, 22, 161, 94, 38, 77, 5, 43, 209, 161, 233, 248, 213, 42, 90, 191, 207, 55,
+        253, 140, 226, 218, 202, 222, 45, 36, 162, 58, 35, 50, 179, 228, 65, 30, 45, 162, 86, 74,
+        225, 83, 128, 224, 236, 41, 89, 152, 198, 74, 32, 82, 200, 49, 145, 133, 65, 131, 51, 45,
+        44, 244, 241, 15, 197, 154, 75, 177, 208, 130, 7, 116, 230, 29, 185, 27, 86, 27, 31, 91,
+        112, 0, 0, 0,
+    ];
+
+    #[test]
+    fn svgz_decodes_and_reports_intrinsics() {
+        let d = intrinsic_dimensions(SVGZ);
+        assert_eq!(
+            d.width,
+            SvgLength {
+                value: 64.0,
+                unit: SvgUnit::Pt
+            }
+        );
+        assert_eq!(
+            d.height,
+            SvgLength {
+                value: 32.0,
+                unit: SvgUnit::Px
+            }
+        );
+
+        let image = decode(SVGZ, &opts()).unwrap();
+        assert!(image.width() > 0);
+        let data = image.first_frame().unwrap().texture().data();
+        assert_eq!(&data[0..4], &[255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn external_reference_probe() {
+        assert!(!references_external_files(TWO_RECTS));
+        assert!(!references_external_files(
+            br##"<svg xmlns="http://www.w3.org/2000/svg"><use href="#a"/><image href="data:image/png;base64,xx"/></svg>"##
+        ));
+        assert!(references_external_files(
+            br#"<svg xmlns="http://www.w3.org/2000/svg"><image href="photo.png"/></svg>"#
+        ));
+        assert!(references_external_files(
+            br#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><image xlink:href="photo.png"/></svg>"#
+        ));
+        assert!(!references_external_files(SVGZ));
     }
 }

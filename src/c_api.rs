@@ -1219,7 +1219,7 @@ pub mod svg {
     /// Opaque parsed-SVG handle.
     #[repr(C)]
     pub struct GlycinNgSvg {
-        bytes: Vec<u8>,
+        bytes: Arc<Vec<u8>>,
         opts: SvgOptions,
         tree: Arc<Tree>,
         intrinsic: IntrinsicDimensions,
@@ -1232,22 +1232,23 @@ pub mod svg {
         data: Vec<u8>,
     }
 
-    fn parse_sandboxed(bytes: &[u8], opts: &SvgOptions) -> Result<Tree> {
+    fn parse_sandboxed(bytes: Arc<Vec<u8>>, opts: &SvgOptions) -> Result<Tree> {
         if opts.system_fonts {
             // Materialize (and mmap) the system font database before
             // entering the worker: landlock blocks the file opens the
             // scan would otherwise perform lazily on first use.
             let _ = svg::system_fontdb();
         }
+        // Resolving external references needs real file access and
+        // landlock carries no allowlist, so it is dropped only when
+        // the caller opted into a resources directory AND the
+        // document actually references external files. Seccomp stays
+        // on either way.
+        let external = opts.resources_dir.is_some() && svg::references_external_files(&bytes);
         let selector = SandboxSelector {
-            // Resolving external references needs real file access
-            // and landlock carries no allowlist, so it is dropped
-            // exactly when the caller opted into a resources
-            // directory. Seccomp stays on either way.
-            landlock: opts.resources_dir.is_none(),
+            landlock: !external,
             ..SandboxSelector::default()
         };
-        let bytes = bytes.to_vec();
         let opts = opts.clone();
         let (tree, _posture) = sandbox::run_in_worker(selector, Limits::default(), move || {
             svg::parse_tree(&bytes, &opts)
@@ -1264,8 +1265,9 @@ pub mod svg {
     ///
     /// `dpi <= 0` selects the default of 96. `resources_dir`, when
     /// non-NULL, names the directory used to resolve relative
-    /// external references (and disables the landlock layer for this
-    /// handle, since those references require file access).
+    /// external references; the landlock layer is disabled only when
+    /// it is set and the document actually references external
+    /// files, since those references require file access.
     /// A non-zero `system_fonts` selects the system font database
     /// instead of the bundled fallback font.
     ///
@@ -1287,16 +1289,26 @@ pub mod svg {
             set_error("data is null but len is non-zero");
             return ptr::null_mut();
         }
-        let bytes: Vec<u8> = if len == 0 {
+        let bytes: Arc<Vec<u8>> = Arc::new(if len == 0 {
             Vec::new()
         } else {
             unsafe { slice::from_raw_parts(data, len) }.to_vec()
-        };
+        });
         let resources_dir = if resources_dir.is_null() {
             None
         } else {
             let s = unsafe { CStr::from_ptr(resources_dir) };
-            Some(PathBuf::from(s.to_string_lossy().as_ref()))
+            // Paths are bytes on Unix; a lossy conversion would mangle
+            // any non-UTF-8 directory name.
+            #[cfg(unix)]
+            {
+                use std::os::unix::ffi::OsStrExt;
+                Some(PathBuf::from(std::ffi::OsStr::from_bytes(s.to_bytes())))
+            }
+            #[cfg(not(unix))]
+            {
+                Some(PathBuf::from(s.to_string_lossy().as_ref()))
+            }
         };
         let opts = SvgOptions {
             stylesheet: None,
@@ -1304,7 +1316,7 @@ pub mod svg {
             resources_dir,
             system_fonts: system_fonts != 0,
         };
-        match parse_sandboxed(&bytes, &opts) {
+        match parse_sandboxed(bytes.clone(), &opts) {
             Ok(tree) => {
                 let intrinsic = svg::intrinsic_dimensions(&bytes);
                 Box::into_raw(Box::new(GlycinNgSvg {
@@ -1335,7 +1347,7 @@ pub mod svg {
     }
 
     fn reparse(handle: &mut GlycinNgSvg) -> c_int {
-        match parse_sandboxed(&handle.bytes, &handle.opts) {
+        match parse_sandboxed(handle.bytes.clone(), &handle.opts) {
             Ok(tree) => {
                 handle.tree = Arc::new(tree);
                 0
@@ -1404,8 +1416,13 @@ pub mod svg {
         if (dpi as f32) == handle.opts.dpi {
             return 0;
         }
+        let prior = handle.opts.dpi;
         handle.opts.dpi = dpi as f32;
-        reparse(handle)
+        let rc = reparse(handle);
+        if rc != 0 {
+            handle.opts.dpi = prior;
+        }
+        rc
     }
 
     /// Resolved document size in pixels at the handle's DPI. Returns

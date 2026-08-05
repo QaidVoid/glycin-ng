@@ -371,11 +371,12 @@ pub unsafe extern "C" fn rsvg_handle_set_base_uri(
     let Some(state) = (unsafe { state_of(handle) }) else {
         return;
     };
+    // A NULL URI is ignored, matching upstream's `!uri.is_null()`
+    // precondition and the `base-uri` property setter.
     if base_uri.is_null() {
-        state.base_uri = None;
-    } else {
-        state.base_uri = Some(unsafe { CStr::from_ptr(base_uri) }.to_owned());
+        return;
     }
+    state.base_uri = Some(unsafe { CStr::from_ptr(base_uri) }.to_owned());
 }
 
 /// Set the base URI from a `GFile`.
@@ -617,13 +618,15 @@ pub unsafe extern "C" fn rsvg_handle_get_dimensions_sub(
     let Some(state) = (unsafe { state_of(handle) }) else {
         return FALSE;
     };
-    if id.is_null() {
-        unsafe { rsvg_handle_get_dimensions(handle, dimension_data) };
-        return state.document().is_some() as gboolean;
-    }
     let Some(doc) = state.document() else {
         return FALSE;
     };
+    if id.is_null() {
+        // Whole-document query: same result as get_dimensions, computed
+        // from the borrow already in hand.
+        unsafe { *dimension_data = natural_dimensions(state) };
+        return TRUE;
+    }
     let Some(id) = (unsafe { id_cstring(id) }) else {
         return FALSE;
     };

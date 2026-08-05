@@ -70,13 +70,17 @@ unsafe fn state_slot(obj: *mut GObject) -> *mut *mut HandleState {
 }
 
 /// Borrow the Rust state of a handle. Returns `None` for NULL
-/// handles or instances whose init did not run.
+/// pointers, GObjects that are not `RsvgHandle`s, or instances whose
+/// init did not run, mirroring upstream's `RSVG_IS_HANDLE` guards.
 ///
 /// # Safety
 ///
-/// `handle` must be NULL or a live `RsvgHandle` instance.
+/// `handle` must be NULL or a live GObject instance.
 pub unsafe fn state_of<'a>(handle: *mut RsvgHandle) -> Option<&'a mut HandleState> {
     if handle.is_null() || PARENT.get().is_none() {
+        return None;
+    }
+    if unsafe { ffi::g_type_check_instance_is_a(handle.cast(), rsvg_handle_get_type()) } == 0 {
         return None;
     }
     let slot = unsafe { state_slot(handle.cast()) };
@@ -124,6 +128,8 @@ unsafe extern "C" fn set_property(
             state.flags = unsafe { ffi::g_value_get_flags(value) };
         }
         PROP_BASE_URI => {
+            // A NULL value is ignored rather than clearing, matching
+            // upstream's property setter and the C entry point.
             let s = unsafe { ffi::g_value_get_string(value) };
             if !s.is_null() {
                 state.base_uri = Some(unsafe { std::ffi::CStr::from_ptr(s) }.to_owned());
