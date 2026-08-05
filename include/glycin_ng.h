@@ -172,6 +172,77 @@ void glycin_ng_encoded_image_free(GlycinNgEncodedImage* image);
 const uint8_t* glycin_ng_encoded_image_data(const GlycinNgEncodedImage* image);
 size_t glycin_ng_encoded_image_len(const GlycinNgEncodedImage* image);
 
+/* ---- Persistent SVG documents (feature "svg") ----
+ *
+ * An SVG handle parses a document once and renders it any number of
+ * times at arbitrary affine transforms; this is the surface the
+ * librsvg compatibility shim builds on. Element ids are bare (no
+ * leading '#'). Handles are not thread-safe. */
+
+typedef struct GlycinNgSvg GlycinNgSvg;
+typedef struct GlycinNgSvgRender GlycinNgSvgRender;
+
+/* Length units returned by glycin_ng_svg_intrinsic_dimensions.
+ * Numbering matches librsvg's RsvgUnit. */
+#define GLYCIN_NG_SVG_UNIT_PERCENT 0u
+#define GLYCIN_NG_SVG_UNIT_PX 1u
+#define GLYCIN_NG_SVG_UNIT_EM 2u
+#define GLYCIN_NG_SVG_UNIT_EX 3u
+#define GLYCIN_NG_SVG_UNIT_IN 4u
+#define GLYCIN_NG_SVG_UNIT_CM 5u
+#define GLYCIN_NG_SVG_UNIT_MM 6u
+#define GLYCIN_NG_SVG_UNIT_PT 7u
+#define GLYCIN_NG_SVG_UNIT_PC 8u
+#define GLYCIN_NG_SVG_UNIT_CH 9u
+
+/* Parse. dpi <= 0 selects the default (96). resources_dir, when
+ * non-NULL, enables resolving relative external references from that
+ * directory (and drops the landlock layer for this handle). Non-zero
+ * system_fonts selects the system font database instead of the
+ * bundled fallback font. */
+GlycinNgSvg* glycin_ng_svg_new(const uint8_t* data, size_t len, double dpi,
+                               const char* resources_dir, int system_fonts);
+void glycin_ng_svg_free(GlycinNgSvg* svg);
+
+/* Option setters; both re-parse the document. css == NULL clears the
+ * stylesheet. */
+int glycin_ng_svg_set_stylesheet(GlycinNgSvg* svg, const uint8_t* css,
+                                 size_t len);
+int glycin_ng_svg_set_dpi(GlycinNgSvg* svg, double dpi);
+
+/* Queries. */
+int glycin_ng_svg_size(const GlycinNgSvg* svg, double* width, double* height);
+int glycin_ng_svg_intrinsic_dimensions(const GlycinNgSvg* svg,
+                                       double* width_value,
+                                       unsigned int* width_unit,
+                                       double* height_value,
+                                       unsigned int* height_unit,
+                                       double viewbox[4], int* has_viewbox);
+int glycin_ng_svg_has_element(const GlycinNgSvg* svg, const char* id);
+/* ink/logical are [x, y, w, h] in document coordinates; non-zero
+ * element_mode normalizes both so the ink rect starts at the
+ * origin. id == NULL measures the whole document. */
+int glycin_ng_svg_element_geometry(const GlycinNgSvg* svg, const char* id,
+                                   int element_mode, double ink[4],
+                                   double logical[4]);
+
+/* Render into a width x height RGBA8 buffer under the 2x3 affine
+ * transform [xx, yx, xy, yy, x0, y0] (NULL selects identity).
+ * id == NULL renders the whole document; otherwise element_mode == 0
+ * renders the element at its in-document position ("layer") and
+ * non-zero renders it extracted at the origin ("element"). Non-zero
+ * unpremultiply converts to straight alpha (GdkPixbuf convention);
+ * zero keeps premultiplied alpha (cairo convention, RGBA channel
+ * order). */
+GlycinNgSvgRender* glycin_ng_svg_render(const GlycinNgSvg* svg, const char* id,
+                                        int element_mode, uint32_t width,
+                                        uint32_t height,
+                                        const double transform[6],
+                                        int unpremultiply);
+void glycin_ng_svg_render_free(GlycinNgSvgRender* render);
+const uint8_t* glycin_ng_svg_render_data(const GlycinNgSvgRender* render);
+size_t glycin_ng_svg_render_len(const GlycinNgSvgRender* render);
+
 #ifdef __cplusplus
 }
 #endif

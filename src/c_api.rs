@@ -1190,3 +1190,492 @@ pub unsafe extern "C" fn glycin_ng_encoded_image_len(image: *const GlycinNgEncod
 // used inside set_error().
 #[allow(dead_code)]
 fn _dummy(_: &Error) {}
+
+/// Persistent SVG document handles (`glycin_ng_svg_*`).
+///
+/// Unlike the one-shot loader API, an SVG handle parses a document
+/// once and then renders it any number of times at arbitrary affine
+/// transforms, which is the shape resolution-independent consumers
+/// need. The librsvg compatibility shim is the primary consumer.
+///
+/// Parsing and rendering run on the sandboxed worker thread
+/// (landlock plus seccomp); geometry queries are pure computation on
+/// the parsed tree and run on the calling thread. Handles are not
+/// thread-safe.
+#[cfg(feature = "svg")]
+pub mod svg {
+    use std::ffi::{CStr, c_char, c_int, c_uint};
+    use std::path::PathBuf;
+    use std::ptr;
+    use std::slice;
+    use std::sync::Arc;
+
+    use super::{clear_error, set_error};
+    use crate::formats::svg::{self, IntrinsicDimensions, SvgOptions, SvgTarget};
+    use crate::sandbox::{self, SandboxSelector};
+    use crate::{Limits, Result};
+    use resvg::usvg::Tree;
+
+    /// Opaque parsed-SVG handle.
+    #[repr(C)]
+    pub struct GlycinNgSvg {
+        bytes: Vec<u8>,
+        opts: SvgOptions,
+        tree: Arc<Tree>,
+        intrinsic: IntrinsicDimensions,
+    }
+
+    /// Opaque RGBA8 render result produced by
+    /// [`glycin_ng_svg_render`].
+    #[repr(C)]
+    pub struct GlycinNgSvgRender {
+        data: Vec<u8>,
+    }
+
+    fn parse_sandboxed(bytes: &[u8], opts: &SvgOptions) -> Result<Tree> {
+        if opts.system_fonts {
+            // Materialize (and mmap) the system font database before
+            // entering the worker: landlock blocks the file opens the
+            // scan would otherwise perform lazily on first use.
+            let _ = svg::system_fontdb();
+        }
+        let selector = SandboxSelector {
+            // Resolving external references needs real file access
+            // and landlock carries no allowlist, so it is dropped
+            // exactly when the caller opted into a resources
+            // directory. Seccomp stays on either way.
+            landlock: opts.resources_dir.is_none(),
+            ..SandboxSelector::default()
+        };
+        let bytes = bytes.to_vec();
+        let opts = opts.clone();
+        let (tree, _posture) = sandbox::run_in_worker(selector, Limits::default(), move || {
+            svg::parse_tree(&bytes, &opts)
+        })?;
+        Ok(tree)
+    }
+
+    fn svg_ref<'a>(svg: *const GlycinNgSvg) -> Option<&'a GlycinNgSvg> {
+        unsafe { svg.as_ref() }
+    }
+
+    /// Parse an SVG document into a reusable handle. Returns NULL on
+    /// error; see [`glycin_ng_last_error`](super::glycin_ng_last_error).
+    ///
+    /// `dpi <= 0` selects the default of 96. `resources_dir`, when
+    /// non-NULL, names the directory used to resolve relative
+    /// external references (and disables the landlock layer for this
+    /// handle, since those references require file access).
+    /// A non-zero `system_fonts` selects the system font database
+    /// instead of the bundled fallback font.
+    ///
+    /// # Safety
+    ///
+    /// `data` must point to at least `len` readable bytes, or `len`
+    /// must be `0`. `resources_dir` must be NULL or a valid
+    /// NUL-terminated string.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn glycin_ng_svg_new(
+        data: *const u8,
+        len: usize,
+        dpi: f64,
+        resources_dir: *const c_char,
+        system_fonts: c_int,
+    ) -> *mut GlycinNgSvg {
+        clear_error();
+        if data.is_null() && len != 0 {
+            set_error("data is null but len is non-zero");
+            return ptr::null_mut();
+        }
+        let bytes: Vec<u8> = if len == 0 {
+            Vec::new()
+        } else {
+            unsafe { slice::from_raw_parts(data, len) }.to_vec()
+        };
+        let resources_dir = if resources_dir.is_null() {
+            None
+        } else {
+            let s = unsafe { CStr::from_ptr(resources_dir) };
+            Some(PathBuf::from(s.to_string_lossy().as_ref()))
+        };
+        let opts = SvgOptions {
+            stylesheet: None,
+            dpi: dpi as f32,
+            resources_dir,
+            system_fonts: system_fonts != 0,
+        };
+        match parse_sandboxed(&bytes, &opts) {
+            Ok(tree) => {
+                let intrinsic = svg::intrinsic_dimensions(&bytes);
+                Box::into_raw(Box::new(GlycinNgSvg {
+                    bytes,
+                    opts,
+                    tree: Arc::new(tree),
+                    intrinsic,
+                }))
+            }
+            Err(e) => {
+                set_error(e);
+                ptr::null_mut()
+            }
+        }
+    }
+
+    /// Free an SVG handle. Safe to call on NULL.
+    ///
+    /// # Safety
+    ///
+    /// `svg` must have been returned by [`glycin_ng_svg_new`] and
+    /// must not have already been freed.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn glycin_ng_svg_free(svg: *mut GlycinNgSvg) {
+        if !svg.is_null() {
+            drop(unsafe { Box::from_raw(svg) });
+        }
+    }
+
+    fn reparse(handle: &mut GlycinNgSvg) -> c_int {
+        match parse_sandboxed(&handle.bytes, &handle.opts) {
+            Ok(tree) => {
+                handle.tree = Arc::new(tree);
+                0
+            }
+            Err(e) => {
+                set_error(e);
+                -1
+            }
+        }
+    }
+
+    /// Inject (or clear, with a NULL `css`) a user-origin CSS
+    /// stylesheet, re-parsing the document. The CSS must be valid
+    /// UTF-8. Returns 0 on success, -1 on error.
+    ///
+    /// # Safety
+    ///
+    /// `svg` must be a valid handle. `css` must be NULL or point to
+    /// at least `len` readable bytes.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn glycin_ng_svg_set_stylesheet(
+        svg: *mut GlycinNgSvg,
+        css: *const u8,
+        len: usize,
+    ) -> c_int {
+        clear_error();
+        let Some(handle) = (unsafe { svg.as_mut() }) else {
+            set_error("svg handle is null");
+            return -1;
+        };
+        let stylesheet = if css.is_null() {
+            None
+        } else {
+            let bytes = unsafe { slice::from_raw_parts(css, len) };
+            match std::str::from_utf8(bytes) {
+                Ok(s) => Some(s.to_owned()),
+                Err(_) => {
+                    set_error("stylesheet is not valid UTF-8");
+                    return -1;
+                }
+            }
+        };
+        let prior = handle.opts.stylesheet.take();
+        handle.opts.stylesheet = stylesheet;
+        let rc = reparse(handle);
+        if rc != 0 {
+            handle.opts.stylesheet = prior;
+        }
+        rc
+    }
+
+    /// Change the DPI used for physical-unit conversion, re-parsing
+    /// the document. `dpi <= 0` selects the default of 96. Returns 0
+    /// on success, -1 on error.
+    ///
+    /// # Safety
+    ///
+    /// `svg` must be a valid handle.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn glycin_ng_svg_set_dpi(svg: *mut GlycinNgSvg, dpi: f64) -> c_int {
+        clear_error();
+        let Some(handle) = (unsafe { svg.as_mut() }) else {
+            set_error("svg handle is null");
+            return -1;
+        };
+        if (dpi as f32) == handle.opts.dpi {
+            return 0;
+        }
+        handle.opts.dpi = dpi as f32;
+        reparse(handle)
+    }
+
+    /// Resolved document size in pixels at the handle's DPI. Returns
+    /// 0 on success, -1 when `svg`, `width` or `height` is NULL.
+    ///
+    /// # Safety
+    ///
+    /// Out pointers must be NULL or valid for writes.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn glycin_ng_svg_size(
+        svg: *const GlycinNgSvg,
+        width: *mut f64,
+        height: *mut f64,
+    ) -> c_int {
+        let Some(handle) = svg_ref(svg) else {
+            return -1;
+        };
+        if width.is_null() || height.is_null() {
+            return -1;
+        }
+        let size = handle.tree.size();
+        unsafe {
+            *width = size.width() as f64;
+            *height = size.height() as f64;
+        }
+        0
+    }
+
+    /// Raw sizing attributes of the root `<svg>` element: numeric
+    /// value plus unit for `width` and `height` (units follow
+    /// librsvg's `RsvgUnit` numbering, percent values normalized so
+    /// `1.0` is 100%), and the `viewBox` when present. Every out
+    /// pointer may be NULL. Returns 0 on success, -1 when `svg` is
+    /// NULL.
+    ///
+    /// # Safety
+    ///
+    /// Out pointers must be NULL or valid for writes; `viewbox` must
+    /// be NULL or point to four writable doubles.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn glycin_ng_svg_intrinsic_dimensions(
+        svg: *const GlycinNgSvg,
+        width_value: *mut f64,
+        width_unit: *mut c_uint,
+        height_value: *mut f64,
+        height_unit: *mut c_uint,
+        viewbox: *mut f64,
+        has_viewbox: *mut c_int,
+    ) -> c_int {
+        let Some(handle) = svg_ref(svg) else {
+            return -1;
+        };
+        let d = &handle.intrinsic;
+        unsafe {
+            if !width_value.is_null() {
+                *width_value = d.width.value;
+            }
+            if !width_unit.is_null() {
+                *width_unit = d.width.unit as c_uint;
+            }
+            if !height_value.is_null() {
+                *height_value = d.height.value;
+            }
+            if !height_unit.is_null() {
+                *height_unit = d.height.unit as c_uint;
+            }
+            if !has_viewbox.is_null() {
+                *has_viewbox = d.viewbox.is_some() as c_int;
+            }
+            if !viewbox.is_null() {
+                let vb = d.viewbox.unwrap_or([0.0; 4]);
+                ptr::copy_nonoverlapping(vb.as_ptr(), viewbox, 4);
+            }
+        }
+        0
+    }
+
+    /// Whether an element with the given bare id (no leading `#`)
+    /// exists. Returns 1 when present, 0 otherwise.
+    ///
+    /// # Safety
+    ///
+    /// `id` must be NULL or a valid NUL-terminated string.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn glycin_ng_svg_has_element(
+        svg: *const GlycinNgSvg,
+        id: *const c_char,
+    ) -> c_int {
+        let Some(handle) = svg_ref(svg) else {
+            return 0;
+        };
+        if id.is_null() {
+            return 0;
+        }
+        let Ok(id) = (unsafe { CStr::from_ptr(id) }).to_str() else {
+            return 0;
+        };
+        svg::has_element(&handle.tree, id) as c_int
+    }
+
+    /// Ink and logical bounding rectangles (`[x, y, w, h]` each) in
+    /// document coordinates. A NULL `id` measures the whole
+    /// document. With a non-zero `element_mode` the rectangles are
+    /// normalized so the ink rect starts at the origin (librsvg
+    /// "element" semantics). Returns 0 on success, -1 on error (e.g.
+    /// unknown id).
+    ///
+    /// # Safety
+    ///
+    /// `id` must be NULL or a valid NUL-terminated string. `ink` and
+    /// `logical` must be NULL or point to four writable doubles.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn glycin_ng_svg_element_geometry(
+        svg: *const GlycinNgSvg,
+        id: *const c_char,
+        element_mode: c_int,
+        ink: *mut f64,
+        logical: *mut f64,
+    ) -> c_int {
+        clear_error();
+        let Some(handle) = svg_ref(svg) else {
+            set_error("svg handle is null");
+            return -1;
+        };
+        let id_str = if id.is_null() {
+            None
+        } else {
+            match unsafe { CStr::from_ptr(id) }.to_str() {
+                Ok(s) => Some(s),
+                Err(_) => {
+                    set_error("id is not valid UTF-8");
+                    return -1;
+                }
+            }
+        };
+        match svg::geometry(&handle.tree, id_str, element_mode != 0) {
+            Ok((ink_r, logical_r)) => {
+                unsafe {
+                    if !ink.is_null() {
+                        ptr::copy_nonoverlapping(ink_r.as_ptr(), ink, 4);
+                    }
+                    if !logical.is_null() {
+                        ptr::copy_nonoverlapping(logical_r.as_ptr(), logical, 4);
+                    }
+                }
+                0
+            }
+            Err(e) => {
+                set_error(e);
+                -1
+            }
+        }
+    }
+
+    /// Render into a `width`x`height` RGBA8 buffer under the 2x3
+    /// affine `transform` (cairo order `[xx, yx, xy, yy, x0, y0]`;
+    /// NULL selects identity). A NULL `id` renders the whole
+    /// document; otherwise `element_mode == 0` renders the element
+    /// at its in-document position ("layer") and non-zero renders it
+    /// extracted at the origin ("element"). Non-zero `unpremultiply`
+    /// converts the result to straight alpha. Returns NULL on error.
+    ///
+    /// # Safety
+    ///
+    /// `svg` must be a valid handle, `id` NULL or a valid
+    /// NUL-terminated string, `transform` NULL or a pointer to six
+    /// readable doubles.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn glycin_ng_svg_render(
+        svg: *const GlycinNgSvg,
+        id: *const c_char,
+        element_mode: c_int,
+        width: u32,
+        height: u32,
+        transform: *const f64,
+        unpremultiply: c_int,
+    ) -> *mut GlycinNgSvgRender {
+        clear_error();
+        let Some(handle) = svg_ref(svg) else {
+            set_error("svg handle is null");
+            return ptr::null_mut();
+        };
+        let id_owned = if id.is_null() {
+            None
+        } else {
+            match unsafe { CStr::from_ptr(id) }.to_str() {
+                Ok(s) => Some(s.to_owned()),
+                Err(_) => {
+                    set_error("id is not valid UTF-8");
+                    return ptr::null_mut();
+                }
+            }
+        };
+        let ts: [f64; 6] = if transform.is_null() {
+            [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+        } else {
+            let mut t = [0.0; 6];
+            unsafe { ptr::copy_nonoverlapping(transform, t.as_mut_ptr(), 6) };
+            t
+        };
+        let element_mode = element_mode != 0;
+        let unpremultiply = unpremultiply != 0;
+        let tree = handle.tree.clone();
+        let result =
+            sandbox::run_in_worker(SandboxSelector::default(), Limits::default(), move || {
+                let target = match id_owned.as_deref() {
+                    None => SvgTarget::Document,
+                    Some(id) if element_mode => SvgTarget::Element(id),
+                    Some(id) => SvgTarget::Layer(id),
+                };
+                svg::render_tree(
+                    &tree,
+                    target,
+                    width,
+                    height,
+                    ts,
+                    unpremultiply,
+                    &Limits::default(),
+                )
+            });
+        match result {
+            Ok((data, _posture)) => Box::into_raw(Box::new(GlycinNgSvgRender { data })),
+            Err(e) => {
+                set_error(e);
+                ptr::null_mut()
+            }
+        }
+    }
+
+    /// Free a render result. Safe to call on NULL.
+    ///
+    /// # Safety
+    ///
+    /// `render` must have been returned by [`glycin_ng_svg_render`]
+    /// and must not have already been freed.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn glycin_ng_svg_render_free(render: *mut GlycinNgSvgRender) {
+        if !render.is_null() {
+            drop(unsafe { Box::from_raw(render) });
+        }
+    }
+
+    /// Borrow the pixel bytes of a render result (row-major RGBA8,
+    /// stride `width * 4`). Valid until the result is freed. Returns
+    /// NULL when `render` is NULL.
+    ///
+    /// # Safety
+    ///
+    /// `render` must be NULL or a valid pointer returned by
+    /// [`glycin_ng_svg_render`].
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn glycin_ng_svg_render_data(
+        render: *const GlycinNgSvgRender,
+    ) -> *const u8 {
+        unsafe { render.as_ref() }
+            .map(|r| r.data.as_ptr())
+            .unwrap_or(ptr::null())
+    }
+
+    /// Length in bytes of a render result's pixel buffer (0 when
+    /// `render` is NULL).
+    ///
+    /// # Safety
+    ///
+    /// `render` must be NULL or a valid pointer returned by
+    /// [`glycin_ng_svg_render`].
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn glycin_ng_svg_render_len(render: *const GlycinNgSvgRender) -> usize {
+        unsafe { render.as_ref() }
+            .map(|r| r.data.len())
+            .unwrap_or(0)
+    }
+}
