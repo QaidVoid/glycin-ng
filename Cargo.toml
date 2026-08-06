@@ -150,3 +150,11 @@ strip = true
 lto = true
 panic = "abort"
 codegen-units = 1
+
+# The SVG rasterizer needs inlining for its SIMD: ~90 KiB for a 2.7x
+# faster render.
+[profile.release.package.tiny-skia]
+opt-level = 3
+
+[profile.release.package.tiny-skia-path]
+opt-level = 3

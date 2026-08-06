@@ -4,7 +4,7 @@ ABI-compatible `librsvg-2.so.2` that forwards every `rsvg_*` call to
 [`glycin-ng`](../)'s resvg-based SVG engine. Drop-in replacement for
 GNOME librsvg.
 
-- **~2.2 MiB of SVG stack instead of ~8.5 MiB** (see below).
+- **~2.3 MiB of SVG stack instead of ~8.5 MiB** (see below).
 - **No pango, no harfbuzz, no libxml2, no fribidi, no graphite2.**
   Text is shaped in-process by the engine's pure-Rust font stack.
 - **Permissive licensing only.** No LGPL transitive code.
@@ -39,14 +39,14 @@ libraries each side drags in that the other does not:
 | | upstream librsvg | this shim |
 |---|---|---|
 | the library | 4.90 MiB | 0.28 MiB |
-| SVG engine behind it | (built in) | 1.93 MiB (`libglycin_ng.so`, SVG-only build) |
+| SVG engine behind it | (built in) | 2.01 MiB (`libglycin_ng.so`, SVG-only build) |
 | libraries only this side needs | 3.61 MiB: pango, pangocairo, pangoft2, harfbuzz, graphite2, fribidi, libxml2, cairo-gobject | none |
-| **total for SVG** | **~8.5 MiB** | **~2.2 MiB** |
+| **total for SVG** | **~8.5 MiB** | **~2.3 MiB** |
 
 Shared by both, so not counted either way: glib, gobject, gio, cairo,
 gdk-pixbuf, and (via cairo) freetype and fontconfig.
 
-A full `libglycin_ng.so` with every format enabled is 4.28 MiB and
+A full `libglycin_ng.so` with every format enabled is 4.37 MiB and
 replaces far more than librsvg, so if the engine is already installed
 for other formats, the incremental cost of SVG support is just the
 0.28 MiB shim.
