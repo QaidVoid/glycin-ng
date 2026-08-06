@@ -4,8 +4,9 @@
 # Builds the engine and the shim in release mode, compiles smoke.c
 # against the system librsvg headers with real GLib/GIO/cairo/
 # gdk-pixbuf, and runs it against the freshly built librsvg-2.so.2.
-# Requires: a C compiler, pkg-config, and the librsvg headers
-# (only the headers; the system librsvg library is not used).
+# Requires: a C compiler, pkg-config, the development headers for
+# gobject-2.0, gio-2.0, cairo and gdk-pixbuf-2.0, and the librsvg
+# headers (only the headers; the system librsvg library is not used).
 #
 # Not wired into `cargo test`: it needs system C libraries and
 # headers that CI containers may not carry. Run it manually before
@@ -16,8 +17,8 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 work="$root/target/librsvg-shim-smoke"
 mkdir -p "$work/libs"
 
-cargo build --release -p glycin-ng-c
-cargo build --release -p glycin-ng-librsvg-shim
+cargo build --manifest-path "$root/Cargo.toml" --release -p glycin-ng-c
+cargo build --manifest-path "$root/Cargo.toml" --release -p glycin-ng-librsvg-shim
 
 ln -sf "$root/target/release/librsvg_2.so" "$work/libs/librsvg-2.so.2"
 ln -sf "$root/target/release/libglycin_ng.so" "$work/libs/libglycin_ng.so"

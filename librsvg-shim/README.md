@@ -7,7 +7,10 @@ GNOME librsvg.
 - **~2.3 MiB of SVG stack instead of ~8.5 MiB** (see below).
 - **No pango, no harfbuzz, no libxml2, no fribidi, no graphite2.**
   Text is shaped in-process by the engine's pure-Rust font stack.
-- **Permissive licensing only.** No LGPL transitive code.
+- **Permissively-licensed decoder.** No LGPL code of our own and no
+  LGPL Rust dependencies, unlike librsvg itself. The GObject stack it
+  links against (glib, cairo, gdk-pixbuf) stays LGPL, as it is for
+  any consumer of this ABI.
 - **Sandboxed parsing and rendering.** Every parse and every render
   runs on a glycin-ng worker thread under seccomp. Landlock is
   applied too, except when parsing a document that both has a
@@ -68,8 +71,9 @@ an installed engine instead of the workspace build.
 real-ABI harness compiled against the system librsvg headers with
 real GLib/cairo/gdk-pixbuf: GType introspection, property
 round-trips, pixel-exact renders, SVGZ, and misuse guards. It needs
-system C headers, so it is a manual pre-release check rather than
-part of `cargo test`.
+a C compiler, pkg-config, and development headers for gobject-2.0,
+gio-2.0, cairo, gdk-pixbuf-2.0 and librsvg, so it is a manual
+pre-release check rather than part of `cargo test`.
 
 ## Install (drop-in)
 
