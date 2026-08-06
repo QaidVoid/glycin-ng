@@ -35,7 +35,7 @@ mod pnm;
 #[cfg(feature = "qoi")]
 mod qoi;
 #[cfg(feature = "svg")]
-mod svg;
+pub(crate) mod svg;
 #[cfg(feature = "tga")]
 mod tga;
 #[cfg(feature = "tiff")]

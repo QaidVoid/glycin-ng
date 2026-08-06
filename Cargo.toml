@@ -10,7 +10,7 @@ keywords = ["decoder", "image", "landlock", "sandbox", "seccomp"]
 categories = ["encoding", "multimedia::images"]
 
 [workspace]
-members = [".", "c-api", "libglycin-shim"]
+members = [".", "c-api", "libglycin-shim", "librsvg-shim"]
 
 [workspace.package]
 version = "0.3.2"
@@ -34,6 +34,7 @@ name = "sandbox_overhead"
 
 [dependencies]
 base64 = { version = "0.22.1", optional = true }
+fontdb = { version = "0.23", default-features = false, features = ["memmap"], optional = true }
 quick-xml = { version = "0.41.0", optional = true }
 thiserror = "2"
 
@@ -138,7 +139,7 @@ jxl = ["dep:jxl-oxide"]
 png = ["dep:png"]
 pnm = ["dep:image"]
 qoi = ["dep:qoi"]
-svg = ["dep:base64", "dep:quick-xml", "dep:resvg"]
+svg = ["dep:base64", "dep:fontdb", "dep:quick-xml", "dep:resvg"]
 tga = ["dep:image"]
 tiff = ["dep:tiff"]
 webp = ["dep:image-webp"]
@@ -149,3 +150,11 @@ strip = true
 lto = true
 panic = "abort"
 codegen-units = 1
+
+# The SVG rasterizer needs inlining for its SIMD: ~90 KiB for a 2.7x
+# faster render.
+[profile.release.package.tiny-skia]
+opt-level = 3
+
+[profile.release.package.tiny-skia-path]
+opt-level = 3
