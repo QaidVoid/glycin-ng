@@ -37,7 +37,11 @@ pub(crate) struct SvgOptions {
 /// Parse `bytes` into a usvg tree, running the XInclude pass first.
 pub(crate) fn parse_tree(bytes: &[u8], opts: &SvgOptions) -> Result<Tree> {
     let parse_opt = Options {
-        fontdb: if opts.system_fonts {
+        // Building the system database means scanning and mapping
+        // every installed font, so it is only worth it for documents
+        // that actually draw text. Icons, the overwhelming majority
+        // of SVGs, skip it entirely.
+        fontdb: if opts.system_fonts && references_text(bytes) {
             system_fontdb()
         } else {
             BUNDLED_FONTDB.clone()
@@ -298,6 +302,27 @@ fn maybe_decompress(bytes: &[u8]) -> Option<Vec<u8>> {
     } else {
         None
     }
+}
+
+/// Whether the document draws text, and therefore needs a real font
+/// database. A substring probe rather than a parse: it runs before
+/// every parse, and a false positive only costs the font scan the
+/// document would otherwise have needed anyway.
+///
+/// Text inside an XInclude payload is not detected (the payload is
+/// still base64 at this point) and renders with the bundled font.
+pub(crate) fn references_text(bytes: &[u8]) -> bool {
+    let decompressed;
+    let bytes = match maybe_decompress(bytes) {
+        Some(d) => {
+            decompressed = d;
+            &decompressed[..]
+        }
+        None => bytes,
+    };
+    // Covers `<text` and `<textPath`; `<tspan` only occurs inside
+    // `<text`.
+    bytes.windows(5).any(|w| w == b"<text")
 }
 
 /// Whether the document references external files: any `href` (or
@@ -821,6 +846,18 @@ mod tests {
         assert!(image.width() > 0);
         let data = image.first_frame().unwrap().texture().data();
         assert_eq!(&data[0..4], &[255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn text_probe_gates_the_font_database() {
+        assert!(!references_text(TWO_RECTS));
+        assert!(!references_text(SVGZ));
+        assert!(references_text(
+            br#"<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="10">hi</text></svg>"#
+        ));
+        assert!(references_text(
+            br##"<svg xmlns="http://www.w3.org/2000/svg"><textPath href="#p">hi</textPath></svg>"##
+        ));
     }
 
     #[test]

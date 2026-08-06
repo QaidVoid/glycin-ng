@@ -4,8 +4,8 @@ ABI-compatible `librsvg-2.so.2` that forwards every `rsvg_*` call to
 [`glycin-ng`](../)'s resvg-based SVG engine. Drop-in replacement for
 GNOME librsvg.
 
-- **~300 KiB translation layer** instead of a 4.6 MiB library.
-- **No pango, no harfbuzz, no fontconfig, no freetype, no libxml2.**
+- **~2.2 MiB of SVG stack instead of ~8.5 MiB** (see below).
+- **No pango, no harfbuzz, no libxml2, no fribidi, no graphite2.**
   Text is shaped in-process by the engine's pure-Rust font stack.
 - **Permissive licensing only.** No LGPL transitive code.
 - **Sandboxed parsing and rendering.** Every parse and every render
@@ -29,17 +29,27 @@ construct-only `flags`, so `g_object_new (RSVG_TYPE_HANDLE, ...)`,
 unmodified gdk-pixbuf SVG loader module loads and renders through the
 shim without recompilation.
 
-## NEEDED comparison
+## Size and dependency comparison
+
+Measured on x86_64 (Gentoo, librsvg 2.62.2, release build of this
+crate). The shim itself is small because the work lives in
+`libglycin_ng.so`, so the honest comparison counts both, plus the
+libraries each side drags in that the other does not:
 
 | | upstream librsvg | this shim |
 |---|---|---|
-| glib / gobject / gio | yes | yes |
-| cairo | yes (+ cairo-gobject) | yes |
-| gdk-pixbuf | yes | yes |
-| libxml2 | yes | no |
-| pango + pangocairo | yes | no |
-| (transitive) harfbuzz, fontconfig, freetype, fribidi | yes | no |
-| decode engine | (built in, 4.6 MiB) | `libglycin_ng.so` |
+| the library | 4.90 MiB | 0.28 MiB |
+| SVG engine behind it | (built in) | 1.93 MiB (`libglycin_ng.so`, SVG-only build) |
+| libraries only this side needs | 3.61 MiB: pango, pangocairo, pangoft2, harfbuzz, graphite2, fribidi, libxml2, cairo-gobject | none |
+| **total for SVG** | **~8.5 MiB** | **~2.2 MiB** |
+
+Shared by both, so not counted either way: glib, gobject, gio, cairo,
+gdk-pixbuf, and (via cairo) freetype and fontconfig.
+
+A full `libglycin_ng.so` with every format enabled is 4.28 MiB and
+replaces far more than librsvg, so if the engine is already installed
+for other formats, the incremental cost of SVG support is just the
+0.28 MiB shim.
 
 ## Build
 
@@ -111,7 +121,10 @@ Documented, deliberate trade-offs against upstream:
   acceptance policy is not replicated.
 - **Fonts.** Text uses the system font database plus a bundled
   Cantarell fallback; the generic families (`sans-serif`, `serif`,
-  ...) map to Cantarell for deterministic output.
+  ...) map to Cantarell for deterministic output. The database is
+  built once per process and only for documents that draw text, so
+  icons never pay for it; text inside an XInclude payload is not
+  detected and falls back to the bundled font.
 - **Viewport fitting** uses uniform `xMidYMid meet` scaling, the
   dominant case; exotic `preserveAspectRatio` values on the root
   element are not honored per-value.

@@ -1233,10 +1233,12 @@ pub mod svg {
     }
 
     fn parse_sandboxed(bytes: Arc<Vec<u8>>, opts: &SvgOptions) -> Result<Tree> {
-        if opts.system_fonts {
-            // Materialize (and mmap) the system font database before
-            // entering the worker: landlock blocks the file opens the
-            // scan would otherwise perform lazily on first use.
+        // Materialize (and mmap) the system font database before
+        // entering the worker: landlock blocks the file opens the
+        // scan would otherwise perform lazily on first use. The
+        // condition must match `parse_tree`'s, so a document that
+        // will use the database always finds it ready.
+        if opts.system_fonts && svg::references_text(&bytes) {
             let _ = svg::system_fontdb();
         }
         // Resolving external references needs real file access and
@@ -1268,8 +1270,10 @@ pub mod svg {
     /// external references; the landlock layer is disabled only when
     /// it is set and the document actually references external
     /// files, since those references require file access.
-    /// A non-zero `system_fonts` selects the system font database
-    /// instead of the bundled fallback font.
+    /// A non-zero `system_fonts` allows the system font database,
+    /// which is built (once, process-wide) only for documents that
+    /// actually draw text; everything else uses the bundled fallback
+    /// font and pays nothing.
     ///
     /// # Safety
     ///
