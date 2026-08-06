@@ -9,11 +9,12 @@ arch=('x86_64' 'aarch64')
 url=https://github.com/QaidVoid/glycin-ng
 license=('MIT' 'Apache-2.0')
 makedepends=('cargo' 'rust' 'git')
-# ABI version the librsvg shim implements; used for its provides,
-# pkg-config file, and the upstream headers fetched below.
+# Upstream ABI versions the shims implement; used for their provides,
+# pkg-config files, and the headers fetched below.
+_glycin_ver=2.1.5
 _librsvg_ver=2.62.3
 source=("$pkgbase::git+https://github.com/QaidVoid/glycin-ng.git#tag=$pkgver"
-        "glycin-2-header::https://raw.githubusercontent.com/GNOME/glycin/80463391d9e8f3f136f48e5fd6a63c0bf116e884/libglycin/include/glycin.h"
+        "glycin-2-header::https://raw.githubusercontent.com/GNOME/glycin/$_glycin_ver/libglycin/include/glycin.h"
         "https://raw.githubusercontent.com/GNOME/librsvg/$_librsvg_ver/include/librsvg/rsvg.h"
         "https://raw.githubusercontent.com/GNOME/librsvg/$_librsvg_ver/include/librsvg/rsvg-cairo.h"
         "https://raw.githubusercontent.com/GNOME/librsvg/$_librsvg_ver/include/librsvg/rsvg-pixbuf.h"
@@ -57,7 +58,7 @@ package_glycin-ng() {
     > "$pkgdir"/usr/lib/pkgconfig/glycin-ng.pc
 
   sed -e "s|@PREFIX@|/usr|g" \
-      -e "s|@VERSION@|2.1.1|g" \
+      -e "s|@VERSION@|$_glycin_ver|g" \
     ./pkgconfig/glycin-2.pc.in \
     > "$pkgdir"/usr/lib/pkgconfig/glycin-2.pc
 }
