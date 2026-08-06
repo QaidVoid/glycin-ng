@@ -1,20 +1,23 @@
-# Maintainer: Samueru-sama xdglawyer@outlook.com
+# Maintainer: Rabindra Dhakal <tiwari.pitamber@gmail.com>
 
-pkgbase=glycin-ng
-pkgname=('glycin-ng' 'glycin-ng-librsvg')
+pkgname=glycin-ng-librsvg
 pkgver=0.3.2
 pkgrel=1
-pkgdesc="In-process image decoder without bwrap dependency or useless bloat"
+pkgdesc="librsvg-2.so.2 compat shim backed by glycin-ng's SVG engine"
 arch=('x86_64' 'aarch64')
 url=https://github.com/QaidVoid/glycin-ng
 license=('MIT' 'Apache-2.0')
-makedepends=('cargo' 'rust' 'git')
-# Upstream ABI versions the shims implement; used for their provides,
-# pkg-config files, and the headers fetched below.
-_glycin_ver=2.1.5
+# Upstream librsvg ABI version this shim implements; used for the
+# provides below, the pkg-config file, and the headers fetched below.
 _librsvg_ver=2.62.3
-source=("$pkgbase::git+https://github.com/QaidVoid/glycin-ng.git#tag=$pkgver"
-        "glycin-2-header::https://raw.githubusercontent.com/GNOME/glycin/$_glycin_ver/libglycin/include/glycin.h"
+# The shim talks to libglycin_ng.so over an internal, unversioned C
+# ABI, so it is pinned to the exact engine release it was built with.
+depends=('cairo' 'gcc-libs' 'gdk-pixbuf2' 'glib2' 'glibc' "glycin-ng=$pkgver")
+makedepends=('cargo' 'rust' 'git' "glycin-ng=$pkgver")
+provides=("librsvg=2:$_librsvg_ver" 'librsvg-2.so=2-64')
+conflicts=('librsvg')
+replaces=('librsvg')
+source=("glycin-ng::git+https://github.com/QaidVoid/glycin-ng.git#tag=$pkgver"
         "https://raw.githubusercontent.com/GNOME/librsvg/$_librsvg_ver/include/librsvg/rsvg.h"
         "https://raw.githubusercontent.com/GNOME/librsvg/$_librsvg_ver/include/librsvg/rsvg-cairo.h"
         "https://raw.githubusercontent.com/GNOME/librsvg/$_librsvg_ver/include/librsvg/rsvg-pixbuf.h"
@@ -25,52 +28,16 @@ sha256sums=('SKIP'
             'SKIP'
             'SKIP'
             'SKIP'
-            'SKIP'
             'SKIP')
 
 build() {
-  cd "$srcdir"/"$pkgbase"
-  cargo build --release -p glycin-ng-c
-  cargo build --release -p glycin-ng-libglycin-shim
-  cargo build --release -p glycin-ng-librsvg-shim
+  cd "$srcdir"/glycin-ng
+  # Link against the installed engine rather than rebuilding it.
+  GLYCIN_NG_LIB_DIR=/usr/lib cargo build --release -p glycin-ng-librsvg-shim
 }
 
-package_glycin-ng() {
-  depends=('glibc')
-  provides=('glycin')
-  conflicts=('glycin')
-  replaces=('glycin')
-
-  cd "$srcdir"/"$pkgbase"
-  install -Dm755 ./target/release/libglycin_ng.so \
-    "$pkgdir"/usr/lib/libglycin_ng.so
-  install -Dm755 ./target/release/libglycin_2.so \
-    "$pkgdir"/usr/lib/libglycin-2.so.0
-  install -Dm644 ./include/glycin_ng.h \
-    "$pkgdir"/usr/include/glycin-ng/glycin_ng.h
-  install -Dm644 "$srcdir"/glycin-2-header \
-    "$pkgdir"/usr/include/glycin-2/glycin.h
-
-  install -d "$pkgdir"/usr/lib/pkgconfig
-  sed -e "s|@PREFIX@|/usr|g" \
-      -e "s|@VERSION@|$pkgver|g" \
-    ./pkgconfig/glycin-ng.pc.in \
-    > "$pkgdir"/usr/lib/pkgconfig/glycin-ng.pc
-
-  sed -e "s|@PREFIX@|/usr|g" \
-      -e "s|@VERSION@|$_glycin_ver|g" \
-    ./pkgconfig/glycin-2.pc.in \
-    > "$pkgdir"/usr/lib/pkgconfig/glycin-2.pc
-}
-
-package_glycin-ng-librsvg() {
-  pkgdesc="librsvg-2.so.2 compat shim backed by glycin-ng's SVG engine"
-  depends=('cairo' 'gcc-libs' 'gdk-pixbuf2' 'glib2' 'glibc' 'glycin-ng')
-  provides=("librsvg=2:$_librsvg_ver" 'librsvg-2.so=2-64')
-  conflicts=('librsvg')
-  replaces=('librsvg')
-
-  cd "$srcdir"/"$pkgbase"
+package() {
+  cd "$srcdir"/glycin-ng
   install -Dm755 ./target/release/librsvg_2.so \
     "$pkgdir"/usr/lib/librsvg-2.so.2
   ln -s librsvg-2.so.2 "$pkgdir"/usr/lib/librsvg-2.so
