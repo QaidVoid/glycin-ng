@@ -22,14 +22,7 @@ deny = []
 
 [advisories]
 yanked = "deny"
-ignore = [
-  # ttf-parser is unmaintained with no safe upgrade. It is pulled in
-  # transitively through resvg/usvg and cannot be replaced independently.
-  "RUSTSEC-2026-0192",
-  # rustybuzz is unmaintained (successor: harfrust). Also pulled in
-  # transitively through resvg/usvg; revisit when resvg migrates.
-  "RUSTSEC-2026-0206",
-]
+ignore = []
 
 [sources]
 unknown-registry = "deny"
