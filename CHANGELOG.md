@@ -1,5 +1,15 @@
 
-## 0.3.2 — 2026-08-03
+## v0.4.0 — 2026-08-07
+
+### Bug Fixes
+
+- **svg:** Drop empty groups that break opacity layers (#19)
+
+### Features
+
+- Librsvg-2.so.2 compat shim (#18)
+
+## v0.3.2 — 2026-08-03
 
 ### Bug Fixes
 

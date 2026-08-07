@@ -1,7 +1,7 @@
 # Maintainer: Rabindra Dhakal <contact@qaidvoid.dev>
 
 pkgname=glycin-ng-librsvg
-pkgver=0.3.2
+pkgver=0.4.0
 pkgrel=1
 pkgdesc="librsvg-2.so.2 compat shim backed by glycin-ng's SVG engine"
 arch=('x86_64' 'aarch64')
