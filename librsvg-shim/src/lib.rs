@@ -1,15 +1,19 @@
 //! ABI-compatible reimplementation of `librsvg-2.so.2` on top of
 //! `libglycin_ng.so`.
 //!
-//! Exports the full public librsvg C ABI: 52 `rsvg_*` functions plus
-//! the three version variables (the union of upstream's
-//! `win32/librsvg.symbols` and `win32/librsvg-pixbuf.symbols` export
-//! lists). SVG parsing and rasterization are delegated to
-//! glycin-ng's `glycin_ng_svg_*` engine API; this crate is purely a
-//! GObject / GIO / cairo / gdk-pixbuf translation layer, resolved
+//! Exports the public librsvg C ABI without pixbuf support: the 44
+//! `rsvg_*` functions of upstream's `win32/librsvg.symbols` plus the
+//! three version variables. SVG parsing and rasterization are
+//! delegated to glycin-ng's `glycin_ng_svg_*` engine API; this crate
+//! is purely a GObject / GIO / cairo translation layer, resolved
 //! against the host process like `libglycin-shim`.
 //!
 //! Documented differences from upstream librsvg:
+//! - The `rsvg_*pixbuf*` entry points of
+//!   `win32/librsvg-pixbuf.symbols` are not provided, which is
+//!   upstream's own `LIBRSVG_HAVE_PIXBUF = FALSE` configuration.
+//!   Packages must ship `rsvg-features.h` accordingly so consumers
+//!   never see the declarations.
 //! - Rendering into vector cairo surfaces (PDF/PS/SVG) embeds a
 //!   raster at device resolution instead of vectors.
 //! - `RSVG_HANDLE_FLAG_UNLIMITED` and `KEEP_IMAGE_DATA` are accepted
@@ -26,8 +30,6 @@ mod ffi;
 mod gobject;
 mod handle;
 mod ngapi;
-mod pixbuf;
-mod pixbuf_ffi;
 mod render;
 mod state;
 
@@ -36,7 +38,6 @@ pub use gobject::{
     rsvg_handle_get_type,
 };
 pub use handle::*;
-pub use pixbuf::*;
 pub use render::*;
 pub use state::{RsvgDimensionData, RsvgLength, RsvgPositionData, RsvgRectangle};
 

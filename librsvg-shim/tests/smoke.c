@@ -1,12 +1,11 @@
 /* Real-ABI smoke test for glycin-ng's librsvg shim.
  *
  * Compiled against the system librsvg headers and linked against the
- * shim's librsvg-2.so.2, with real GLib/GIO/cairo/gdk-pixbuf from the
+ * shim's librsvg-2.so.2, with real GLib/GIO/cairo from the
  * host. Exercises the paths actual consumers use.
  */
 #include <librsvg/rsvg.h>
 #include <cairo.h>
-#include <gdk-pixbuf/gdk-pixbuf.h>
 #include <gio/gio.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -177,31 +176,6 @@ static void test_render_document(void)
     g_object_unref(h);
 }
 
-static void test_pixbuf(void)
-{
-    GError *error = NULL;
-    RsvgHandle *h = rsvg_handle_new_from_data((const guint8 *)TWO_RECTS,
-                                              strlen(TWO_RECTS), &error);
-    GdkPixbuf *pb = rsvg_handle_get_pixbuf_and_error(h, &error);
-    CHECK(pb != NULL && error == NULL, "get_pixbuf_and_error returns a pixbuf");
-    CHECK(gdk_pixbuf_get_width(pb) == 20 && gdk_pixbuf_get_height(pb) == 10,
-          "pixbuf has the natural size");
-    const guchar *px = gdk_pixbuf_get_pixels(pb);
-    CHECK(px[0] == 255 && px[1] == 0 && px[2] == 0 && px[3] == 255,
-          "pixbuf top-left pixel is opaque red");
-    g_object_unref(pb);
-
-    pb = rsvg_handle_get_pixbuf_sub(h, "#right");
-    CHECK(pb != NULL, "get_pixbuf_sub returns a pixbuf");
-    px = gdk_pixbuf_get_pixels(pb);
-    CHECK(px[3] == 0, "sub-pixbuf leaves other areas transparent");
-    int rs = gdk_pixbuf_get_rowstride(pb);
-    const guchar *right = px + 5 * rs + 15 * 4;
-    CHECK(right[2] == 255 && right[3] == 255, "sub-pixbuf renders #right blue");
-    g_object_unref(pb);
-    g_object_unref(h);
-}
-
 static void size_func_4x(gint *w, gint *h, gpointer data)
 {
     (void)data;
@@ -220,15 +194,13 @@ static void test_size_callback(void)
     rsvg_handle_get_dimensions(h, &dim);
     CHECK(dim.width == 80 && dim.height == 40, "size callback scales get_dimensions");
 
-    GdkPixbuf *pb = rsvg_handle_get_pixbuf(h);
-    CHECK(pb && gdk_pixbuf_get_width(pb) == 80, "get_pixbuf honors size callback");
-    if (pb) {
-        const guchar *px = gdk_pixbuf_get_pixels(pb);
-        int rs = gdk_pixbuf_get_rowstride(pb);
-        const guchar *mid = px + 20 * rs + 70 * 4;
-        CHECK(mid[2] == 255 && mid[3] == 255, "scaled pixbuf is vector-sharp blue");
-        g_object_unref(pb);
-    }
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 80, 40);
+    cairo_t *cr = cairo_create(surface);
+    CHECK(rsvg_handle_render_cairo(h, cr), "render_cairo honors size callback");
+    CHECK(surface_pixel(surface, 70, 20) == 0xFF0000FFu,
+          "scaled render is vector-sharp blue");
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
     g_object_unref(h);
 }
 
@@ -260,10 +232,12 @@ static void test_stylesheet_and_dpi(void)
     const char css[] = "rect { fill: #00ff00 !important; }";
     CHECK(rsvg_handle_set_stylesheet(h, (const guint8 *)css, strlen(css), &error),
           "set_stylesheet succeeds");
-    GdkPixbuf *pb = rsvg_handle_get_pixbuf_and_error(h, &error);
-    const guchar *px = pb ? gdk_pixbuf_get_pixels(pb) : NULL;
-    CHECK(px && px[1] == 255 && px[0] == 0, "stylesheet recolors to green");
-    if (pb) g_object_unref(pb);
+    cairo_surface_t *css_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 20, 10);
+    cairo_t *css_cr = cairo_create(css_surface);
+    CHECK(rsvg_handle_render_cairo(h, css_cr), "stylesheet render succeeds");
+    CHECK(surface_pixel(css_surface, 5, 5) == 0xFF00FF00u, "stylesheet recolors to green");
+    cairo_destroy(css_cr);
+    cairo_surface_destroy(css_surface);
     g_object_unref(h);
 
     static const char INCH[] =
@@ -331,15 +305,6 @@ static void test_file_loading(const char *dir)
     CHECK(h != NULL && error == NULL, "new_from_gfile_sync loads");
     if (h) g_object_unref(h);
     g_object_unref(gf);
-
-    GdkPixbuf *pb = rsvg_pixbuf_from_file_at_size(path, 40, 20, &error);
-    CHECK(pb && gdk_pixbuf_get_width(pb) == 40, "rsvg_pixbuf_from_file_at_size works");
-    if (pb) g_object_unref(pb);
-
-    pb = rsvg_pixbuf_from_file_at_max_size(path, 10, 10, &error);
-    CHECK(pb && gdk_pixbuf_get_width(pb) == 10 && gdk_pixbuf_get_height(pb) == 5,
-          "rsvg_pixbuf_from_file_at_max_size shrinks uniformly");
-    if (pb) g_object_unref(pb);
 }
 
 static void test_text_rendering(void)
@@ -352,15 +317,18 @@ static void test_text_rendering(void)
     GError *error = NULL;
     RsvgHandle *h = rsvg_handle_new_from_data((const guint8 *)TEXT, strlen(TEXT), &error);
     CHECK(h != NULL, "text SVG loads");
-    GdkPixbuf *pb = rsvg_handle_get_pixbuf_and_error(h, &error);
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 128, 32);
+    cairo_t *cr = cairo_create(surface);
+    CHECK(rsvg_handle_render_cairo(h, cr), "text SVG renders");
+    cairo_destroy(cr);
+    cairo_surface_flush(surface);
     int dark = 0;
-    if (pb) {
-        const guchar *px = gdk_pixbuf_get_pixels(pb);
-        int n = gdk_pixbuf_get_height(pb) * gdk_pixbuf_get_rowstride(pb);
-        for (int i = 0; i + 3 < n; i += 4)
-            if (px[i] < 128 && px[i + 3] > 128) dark++;
-        g_object_unref(pb);
-    }
+    for (int y = 0; y < 32; y++)
+        for (int x = 0; x < 128; x++) {
+            guint32 p = surface_pixel(surface, x, y);
+            if ((p >> 24) > 128 && ((p >> 16) & 0xFF) < 128) dark++;
+        }
+    cairo_surface_destroy(surface);
     CHECK(dark > 20, "text renders with system fonts");
     g_object_unref(h);
 }
@@ -428,13 +396,12 @@ static void test_svgz(void)
     CHECK(rsvg_handle_get_intrinsic_size_in_pixels(h, &w, &hh) && w == 80.0,
           "SVGZ intrinsic size resolves to pixels");
 
-    GdkPixbuf *pb = rsvg_handle_get_pixbuf_and_error(h, &error);
-    CHECK(pb != NULL, "SVGZ renders");
-    if (pb) {
-        const guchar *px = gdk_pixbuf_get_pixels(pb);
-        CHECK(px[0] == 255 && px[3] == 255, "SVGZ pixels are correct");
-        g_object_unref(pb);
-    }
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 80, 80);
+    cairo_t *cr = cairo_create(surface);
+    CHECK(rsvg_handle_render_cairo(h, cr), "SVGZ renders");
+    cairo_destroy(cr);
+    CHECK(surface_pixel(surface, 5, 5) == 0xFFFF0000u, "SVGZ pixels are correct");
+    cairo_surface_destroy(surface);
     g_object_unref(h);
 }
 
@@ -446,7 +413,6 @@ int main(int argc, char **argv)
     test_construct_properties();
     test_load_and_dimensions();
     test_render_document();
-    test_pixbuf();
     test_size_callback();
     test_write_close();
     test_stylesheet_and_dpi();
