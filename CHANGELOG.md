@@ -1,5 +1,12 @@
 
-## v0.4.0 — 2026-08-07
+## 0.4.1 — 2026-08-14
+
+### Bug Fixes
+
+- Silence clippy lints on chunk iteration and casts (#22)
+- **pkg:** Drop the pixbuf API and correct runtime deps (#21)
+
+## 0.4.0 — 2026-08-07
 
 ### Bug Fixes
 
@@ -9,7 +16,7 @@
 
 - Librsvg-2.so.2 compat shim (#18)
 
-## v0.3.2 — 2026-08-03
+## 0.3.2 — 2026-08-03
 
 ### Bug Fixes
 
