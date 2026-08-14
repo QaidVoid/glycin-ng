@@ -141,7 +141,7 @@ pub unsafe extern "C" fn gly_loader_new(file: *mut GFile) -> *mut GObject {
     if stream.is_null() {
         return ptr::null_mut();
     }
-    let bytes = unsafe { read_input_stream(stream as *mut GInputStream) };
+    let bytes = unsafe { read_input_stream(stream) };
     unsafe { ffi::g_object_unref(stream as *mut c_void) };
     match bytes {
         Some(b) => new_loader_from_bytes(b),

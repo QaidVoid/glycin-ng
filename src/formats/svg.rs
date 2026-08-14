@@ -588,7 +588,7 @@ mod tests {
 
         let image = decode(wrapper.as_bytes(), &opts()).unwrap();
         let data = image.first_frame().unwrap().texture().data();
-        let alpha_set = data.chunks_exact(4).filter(|p| p[3] != 0).count();
+        let alpha_set = data.as_chunks::<4>().0.iter().filter(|p| p[3] != 0).count();
         assert!(
             alpha_set > 0,
             "expected non-transparent output after xi:include expansion"
@@ -642,7 +642,9 @@ mod tests {
         let image = decode(bytes, &opts()).unwrap();
         let data = image.first_frame().unwrap().texture().data();
         let non_white = data
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[0] < 240 || p[3] < 240)
             .count();
         assert!(non_white > 0, "text element '18:30' was not rendered");

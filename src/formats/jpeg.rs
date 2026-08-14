@@ -73,7 +73,7 @@ fn map_err(e: jpeg_decoder::Error) -> Error {
 
 fn be_to_native_u16(buf: &mut [u8]) {
     if cfg!(target_endian = "little") {
-        for pair in buf.chunks_exact_mut(2) {
+        for pair in buf.as_chunks_mut::<2>().0 {
             pair.swap(0, 1);
         }
     }
