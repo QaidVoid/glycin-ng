@@ -12,7 +12,7 @@ license=('MIT' 'Apache-2.0')
 _librsvg_ver=2.62.3
 # The shim talks to libglycin_ng.so over an internal, unversioned C
 # ABI, so it is pinned to the exact engine release it was built with.
-depends=('cairo' 'gcc-libs' 'gdk-pixbuf2' 'glib2' 'glibc' "glycin-ng=$pkgver")
+depends=('cairo' 'glib2' 'glibc' 'libgcc' "glycin-ng=$pkgver")
 makedepends=('cargo' 'rust' 'git' "glycin-ng=$pkgver")
 provides=("librsvg=2:$_librsvg_ver" 'librsvg-2.so=2-64')
 conflicts=('librsvg')
@@ -20,11 +20,9 @@ replaces=('librsvg')
 source=("glycin-ng::git+https://github.com/QaidVoid/glycin-ng.git#tag=$pkgver"
         "https://raw.githubusercontent.com/GNOME/librsvg/$_librsvg_ver/include/librsvg/rsvg.h"
         "https://raw.githubusercontent.com/GNOME/librsvg/$_librsvg_ver/include/librsvg/rsvg-cairo.h"
-        "https://raw.githubusercontent.com/GNOME/librsvg/$_librsvg_ver/include/librsvg/rsvg-pixbuf.h"
         "https://raw.githubusercontent.com/GNOME/librsvg/$_librsvg_ver/include/librsvg/rsvg-features.h.in"
         "https://raw.githubusercontent.com/GNOME/librsvg/$_librsvg_ver/include/librsvg/rsvg-version.h.in")
 sha256sums=('SKIP'
-            'SKIP'
             'SKIP'
             'SKIP'
             'SKIP'
@@ -43,15 +41,15 @@ package() {
   ln -s librsvg-2.so.2 "$pkgdir"/usr/lib/librsvg-2.so
 
   # Headers are upstream's own; the two generated ones get the same
-  # substitutions meson applies.
+  # substitutions meson applies. LIBRSVG_HAVE_PIXBUF is FALSE, which
+  # is upstream's own no-pixbuf build, so rsvg.h never pulls in
+  # rsvg-pixbuf.h and that header is not shipped.
   local _v=(${_librsvg_ver//./ })
   install -Dm644 "$srcdir"/rsvg.h \
     "$pkgdir"/usr/include/librsvg-2.0/librsvg/rsvg.h
   install -Dm644 "$srcdir"/rsvg-cairo.h \
     "$pkgdir"/usr/include/librsvg-2.0/librsvg/rsvg-cairo.h
-  install -Dm644 "$srcdir"/rsvg-pixbuf.h \
-    "$pkgdir"/usr/include/librsvg-2.0/librsvg/rsvg-pixbuf.h
-  sed -e "s|@LIBRSVG_HAVE_PIXBUF@|TRUE|g" \
+  sed -e "s|@LIBRSVG_HAVE_PIXBUF@|FALSE|g" \
     "$srcdir"/rsvg-features.h.in \
     > "$pkgdir"/usr/include/librsvg-2.0/librsvg/rsvg-features.h
   sed -e "s|@LIBRSVG_MAJOR_VERSION@|${_v[0]}|g" \

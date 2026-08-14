@@ -27,14 +27,10 @@ fn main() {
     // Real librsvg carries these NEEDED entries itself; consumers
     // (e.g. the gdk-pixbuf SVG loader module) rely on the library
     // bringing its own dependencies rather than the host process
-    // having them loaded.
-    for lib in [
-        "cairo",
-        "gobject-2.0",
-        "gio-2.0",
-        "glib-2.0",
-        "gdk_pixbuf-2.0",
-    ] {
+    // having them loaded. gdk-pixbuf is deliberately absent: its one
+    // symbol is resolved lazily in `pixbuf_ffi`, so consumers that
+    // never call the `rsvg_*pixbuf*` entry points need not have it.
+    for lib in ["cairo", "gobject-2.0", "gio-2.0", "glib-2.0"] {
         println!("cargo:rustc-link-lib=dylib={lib}");
     }
 

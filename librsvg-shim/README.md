@@ -9,7 +9,7 @@ GNOME librsvg.
   Text is shaped in-process by the engine's pure-Rust font stack.
 - **Permissively-licensed decoder.** No LGPL code of our own and no
   LGPL Rust dependencies, unlike librsvg itself. The GObject stack it
-  links against (glib, cairo, gdk-pixbuf) stays LGPL, as it is for
+  links against (glib, cairo) stays LGPL, as it is for
   any consumer of this ABI.
 - **Sandboxed parsing and rendering.** Every parse and every render
   runs on a glycin-ng worker thread under seccomp. Landlock is
@@ -21,16 +21,34 @@ GNOME librsvg.
 
 ## ABI coverage
 
-The shim exports the exact public librsvg export table: 52 `rsvg_*`
-functions plus `rsvg_major_version` / `rsvg_minor_version` /
-`rsvg_micro_version` (the union of upstream's `win32/librsvg.symbols`
-and `win32/librsvg-pixbuf.symbols`). `RsvgHandle` is registered as a
+The shim exports upstream's `win32/librsvg.symbols` table: 44
+`rsvg_*` functions plus `rsvg_major_version` / `rsvg_minor_version` /
+`rsvg_micro_version`. The `win32/librsvg-pixbuf.symbols` entry points
+are deliberately absent; see below. `RsvgHandle` is registered as a
 real GObject subtype with the ABI-mandated instance/class sizes
 (`_abi_padding` in `rsvg.h`) and all 11 properties, including the
 construct-only `flags`, so `g_object_new (RSVG_TYPE_HANDLE, ...)`,
-`g_object_get`, and `RSVG_IS_HANDLE` behave like upstream. The
-unmodified gdk-pixbuf SVG loader module loads and renders through the
-shim without recompilation.
+`g_object_get`, and `RSVG_IS_HANDLE` behave like upstream.
+
+### No pixbuf API
+
+`rsvg_handle_get_pixbuf*` and `rsvg_pixbuf_from_file*` are not
+provided. This is upstream's own `LIBRSVG_HAVE_PIXBUF = FALSE`
+configuration, not an omission: `rsvg.h` guards `rsvg-pixbuf.h`
+behind that macro, so packages ship a `rsvg-features.h` with it set
+to `FALSE` and consumers never see the declarations. `tests/run.sh`
+compiles against exactly that header configuration.
+
+The consequence is that the shim links no gdk-pixbuf, and neither do
+its consumers on its account. On Arch that alone removes
+`gdk-pixbuf2`, `shared-mime-info`, `libxml2` and `icu`, 55 MiB.
+
+The cost is the gdk-pixbuf SVG loader module, which calls
+`rsvg_handle_get_pixbuf_and_error`. That module no longer exists on
+distros whose gdk-pixbuf talks to glycin directly (2.43+, e.g. current
+Arch, where librsvg ships no loader at all). On distros that still use
+the loader-module system, SVG decoding through gdk-pixbuf needs
+`libglycin-shim` instead, which routes it into the same engine.
 
 ## Size and dependency comparison
 
@@ -47,7 +65,9 @@ libraries each side drags in that the other does not:
 | **total for SVG** | **~8.5 MiB** | **~2.3 MiB** |
 
 Shared by both, so not counted either way: glib, gobject, gio, cairo,
-gdk-pixbuf, and (via cairo) freetype and fontconfig.
+and (via cairo) freetype and fontconfig. These appear in the
+signatures of the ABI itself, so a caller handing us a `cairo_t *` or
+freeing our `GError` has them loaded by definition.
 
 A full `libglycin_ng.so` with every format enabled is 4.37 MiB and
 replaces far more than librsvg, so if the engine is already installed
@@ -68,12 +88,12 @@ against the engine. Set `GLYCIN_NG_LIB_DIR` to point the link step at
 an installed engine instead of the workspace build.
 
 `tests/run.sh` builds everything and runs `tests/smoke.c`, a
-real-ABI harness compiled against the system librsvg headers with
-real GLib/cairo/gdk-pixbuf: GType introspection, property
-round-trips, pixel-exact renders, SVGZ, and misuse guards. It needs
-a C compiler, pkg-config, and development headers for gobject-2.0,
-gio-2.0, cairo, gdk-pixbuf-2.0 and librsvg, so it is a manual
-pre-release check rather than part of `cargo test`.
+real-ABI harness compiled against the librsvg headers as this repo
+ships them (`LIBRSVG_HAVE_PIXBUF FALSE`) with real GLib and cairo:
+GType introspection, property round-trips, pixel-exact renders,
+SVGZ, and misuse guards. It needs a C compiler, pkg-config, and
+development headers for gobject-2.0, gio-2.0, cairo and librsvg, so
+it is a manual pre-release check rather than part of `cargo test`.
 
 ## Install (drop-in)
 
@@ -83,24 +103,26 @@ install -Dm755 target/release/librsvg_2.so /usr/lib/librsvg-2.so.2
 ln -sf librsvg-2.so.2 /usr/lib/librsvg-2.so
 ```
 
-Headers are upstream's own: ship `rsvg.h`, `rsvg-cairo.h`, and
-`rsvg-pixbuf.h` verbatim into `/usr/include/librsvg-2.0/librsvg/`,
-and `pkgconfig/librsvg-2.0.pc.in` from this repo as
-`librsvg-2.0.pc`.
+Headers are upstream's own: ship `rsvg.h` and `rsvg-cairo.h`
+verbatim into `/usr/include/librsvg-2.0/librsvg/`, and
+`pkgconfig/librsvg-2.0.pc.in` from this repo as `librsvg-2.0.pc`.
+Generate `rsvg-features.h` from upstream's `.in` with
+`LIBRSVG_HAVE_PIXBUF` set to `FALSE`, and do not ship
+`rsvg-pixbuf.h`. See `pkgbuilds/glycin-ng-librsvg/PKGBUILD`.
 
 Depending on the distro, a full replacement package may also need
 pieces the librsvg package traditionally carried, all of which keep
 working against the shim:
 
-- the gdk-pixbuf loader module (`libpixbufloader-svg.so`) and
-  `librsvg.thumbnailer`, but only on distros whose gdk-pixbuf still
-  uses the loader-module system (Debian, Ubuntu, Gentoo, ...).
-  Glycin-enabled gdk-pixbuf (2.43+, e.g. current Arch) has dropped
-  loaders entirely and Arch's librsvg no longer ships either file;
-  there gdk-pixbuf SVG decoding already flows through libglycin
-  (and with `libglycin-shim`, straight into this same engine), so
-  this shim serves the direct librsvg linkers: GTK4, ffmpeg, GIMP,
-  Emacs, and friends.
+- on distros whose gdk-pixbuf still uses the loader-module system
+  (Debian, Ubuntu, Gentoo, ...), `libpixbufloader-svg.so` and
+  `librsvg.thumbnailer` will not work against this shim, because the
+  loader calls `rsvg_handle_get_pixbuf_and_error`. Install
+  `libglycin-shim` there so gdk-pixbuf reaches the same engine
+  directly. Glycin-enabled gdk-pixbuf (2.43+, e.g. current Arch) has
+  dropped loaders entirely and Arch's librsvg ships neither file, so
+  nothing is lost there. Either way this shim serves the direct
+  librsvg linkers: GTK4, ffmpeg, GIMP, Emacs, and friends.
 - `Rsvg-2.0.typelib` if GObject Introspection consumers (Python,
   JavaScript) matter; the registered GTypes are compatible with the
   upstream typelib.
