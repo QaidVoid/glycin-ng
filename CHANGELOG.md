@@ -1,4 +1,10 @@
 
+## 0.4.2 — 2026-08-19
+
+### Bug Fixes
+
+- **svg:** Actually wire in the empty-group strip (#23)
+
 ## 0.4.1 — 2026-08-14
 
 ### Bug Fixes
