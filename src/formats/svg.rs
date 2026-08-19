@@ -5,6 +5,7 @@
 //! persistent SVG document C API (`glycin_ng_svg_*`), which the
 //! librsvg compatibility shim builds on.
 
+mod empty_groups;
 mod xinclude;
 
 use std::path::PathBuf;
@@ -52,13 +53,20 @@ pub(crate) fn parse_tree(bytes: &[u8], opts: &SvgOptions) -> Result<Tree> {
         ..Default::default()
     };
     let owned;
-    let svg_bytes: &[u8] = match xinclude::expand(bytes) {
+    let mut svg_bytes: &[u8] = match xinclude::expand(bytes) {
         Some(expanded) => {
             owned = expanded;
             &owned
         }
         None => bytes,
     };
+    // Runs on the expanded document: the empty groups that trigger
+    // the resvg bug arrive inside the XInclude payload.
+    let cleaned;
+    if let Some(stripped) = empty_groups::strip(svg_bytes) {
+        cleaned = stripped;
+        svg_bytes = &cleaned;
+    }
     Tree::from_data(svg_bytes, &parse_opt).map_err(|e| Error::Malformed(e.to_string()))
 }
 
