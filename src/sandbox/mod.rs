@@ -9,7 +9,41 @@
 
 pub(crate) mod landlock;
 pub(crate) mod rlimit;
+
+/// Syscall filter backend.
+///
+/// `seccompiler` only supports little-endian x86_64, aarch64 and
+/// riscv64; it does not build on ppc64 (big-endian) and has no
+/// `TargetArch` for ppc64le or loongarch64. On every other target the
+/// layer compiles to a no-op so the remaining sandbox layers keep
+/// working.
+#[cfg(all(
+    target_os = "linux",
+    feature = "seccomp",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "riscv64"
+    )
+))]
 pub(crate) mod seccomp;
+
+#[cfg(not(all(
+    target_os = "linux",
+    feature = "seccomp",
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "riscv64"
+    )
+)))]
+pub(crate) mod seccomp {
+    use crate::SeccompPosture;
+
+    pub(crate) fn apply() -> SeccompPosture {
+        SeccompPosture::Disabled
+    }
+}
 
 use std::sync::OnceLock;
 
@@ -78,14 +112,16 @@ pub enum LandlockPosture {
 pub enum SeccompPosture {
     /// Filter program installed on the decode thread.
     Enforced,
-    /// Kernel rejected the filter or the platform does not support
+    /// Kernel rejected the filter, the architecture has no
+    /// `seccompiler` backend, or the platform does not support
     /// seccomp.
     Unsupported {
         /// Short reason string for logging.
         reason: &'static str,
     },
-    /// The `seccomp` Cargo feature was off, or the loader was asked
-    /// to skip this layer.
+    /// The `seccomp` Cargo feature was off, the loader was asked to
+    /// skip this layer, or the target architecture has no
+    /// `seccompiler` backend.
     Disabled,
 }
 
@@ -388,7 +424,15 @@ mod tests {
         }
     }
 
-    #[cfg(all(target_os = "linux", feature = "seccomp"))]
+    #[cfg(all(
+        target_os = "linux",
+        feature = "seccomp",
+        any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "riscv64"
+        )
+    ))]
     #[test]
     fn seccomp_denies_unlisted_syscall() {
         let selector = SandboxSelector {

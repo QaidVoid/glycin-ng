@@ -164,6 +164,12 @@ before the call returns. Three layers stack on that thread:
 | seccomp    | on      | BPF allowlist; everything else returns `EPERM` | `Unsupported` if `prctl` fails |
 | rlimit     | off     | `RLIMIT_AS` and `RLIMIT_CPU` from `Limits`  | `PartiallyApplied` per limit   |
 
+seccomp is only compiled where `seccompiler` has a backend:
+little-endian x86_64, aarch64 and riscv64. On every other Linux target
+(ppc64, ppc64le, loongarch64, ...) the `seccomp` feature is accepted
+but compiled out, so the worker runs with landlock and rlimit alone and
+reports `SeccompPosture::Disabled`.
+
 Toggle layers with `Loader::sandbox_selector(SandboxSelector { ... })`.
 Inspect the result with `Image::sandbox_posture()` and decide whether
 to log, audit, or refuse a degraded posture.
@@ -200,7 +206,7 @@ Override via `Loader::limits(Limits { ... })`.
 | Group          | Default                          | Notes                                   |
 |----------------|----------------------------------|-----------------------------------------|
 | Capability     | `decode`, `metadata`             | enable `encode` for PNG, JPEG, GIF, WebP, TIFF, BMP |
-| Sandbox        | `landlock`, `seccomp` (Linux)    | toggling off is supported for portability testing, not as a production posture |
+| Sandbox        | `landlock`, `seccomp` (Linux)    | `seccomp` is compiled on x86_64/aarch64/riscv64 only and is a no-op elsewhere; toggling off is supported for portability testing, not as a production posture |
 | Per-format     | `png`, `jpeg`, `gif`, `webp`, `tiff`, `bmp`, `ico`, `tga`, `qoi`, `exr`, `pnm`, `dds`, `jxl`, `svg` | trim individually     |
 | ABI            | (off) `c-api`                    | enables the `cdylib` build and `cbindgen` header |
 

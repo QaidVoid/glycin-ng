@@ -2,7 +2,6 @@
 
 use crate::SeccompPosture;
 
-#[cfg(all(target_os = "linux", feature = "seccomp"))]
 pub(crate) fn apply() -> SeccompPosture {
     use seccompiler::BpfProgram;
 
@@ -38,7 +37,6 @@ pub(crate) fn apply() -> SeccompPosture {
     SeccompPosture::Enforced
 }
 
-#[cfg(all(target_os = "linux", feature = "seccomp"))]
 fn build_filter(arch: seccompiler::TargetArch) -> Result<seccompiler::SeccompFilter, &'static str> {
     use seccompiler::{
         SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter, SeccompRule,
@@ -221,16 +219,10 @@ fn build_filter(arch: seccompiler::TargetArch) -> Result<seccompiler::SeccompFil
     .map_err(|_| "filter build failed")
 }
 
-#[cfg(all(target_os = "linux", feature = "seccomp"))]
 fn target_arch() -> Option<seccompiler::TargetArch> {
     match std::env::consts::ARCH {
         "x86_64" => Some(seccompiler::TargetArch::x86_64),
         "aarch64" => Some(seccompiler::TargetArch::aarch64),
         _ => None,
     }
-}
-
-#[cfg(not(all(target_os = "linux", feature = "seccomp")))]
-pub(crate) fn apply() -> SeccompPosture {
-    SeccompPosture::Disabled
 }
