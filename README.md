@@ -173,6 +173,13 @@ crate ships built-in regression tests asserting both that an unlisted
 syscall (`socket`) is denied under seccomp, and that the worker
 spawns a rayon pool for JPEG / JXL without tripping `clone3`.
 
+The seccomp program is assembled in-tree instead of through
+`seccompiler`, which does not build on big-endian targets and has no
+architecture table entry for ppc64, ppc64le or loongarch64. The
+allowlist is vetted for x86_64, aarch64, riscv64, ppc64, ppc64le and
+loongarch64; on any other architecture the layer reports
+`SeccompPosture::Unsupported` and landlock and rlimit still apply.
+
 The dominant cost is the seccomp install: the BPF program is
 JIT-compiled into the kernel on every `prctl(PR_SET_SECCOMP)`, so its
 overhead scales with the size of the allowlist. Landlock adds a
