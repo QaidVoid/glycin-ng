@@ -42,20 +42,19 @@ mod imp {
     #[cfg(target_endian = "big")]
     const AUDIT_ARCH_LE: u32 = 0;
 
-    /// Value the kernel reports in `seccomp_data.arch`, or `None` on a
-    /// 64-bit architecture whose syscall numbering we have not vetted
-    /// the allowlist against. The machine numbers are the `EM_*`
-    /// values from `elf.h`; the combinations come from `linux/audit.h`.
+    /// `EM_*` machine number from `elf.h`, or `None` on a 64-bit
+    /// architecture whose syscall numbering we have not vetted the
+    /// allowlist against.
     #[cfg(target_arch = "x86_64")]
-    const AUDIT_ARCH: Option<u32> = Some(62 | AUDIT_ARCH_64BIT | AUDIT_ARCH_LE);
+    const AUDIT_ARCH_MACHINE: Option<u32> = Some(62);
     #[cfg(target_arch = "aarch64")]
-    const AUDIT_ARCH: Option<u32> = Some(183 | AUDIT_ARCH_64BIT | AUDIT_ARCH_LE);
+    const AUDIT_ARCH_MACHINE: Option<u32> = Some(183);
     #[cfg(target_arch = "riscv64")]
-    const AUDIT_ARCH: Option<u32> = Some(243 | AUDIT_ARCH_64BIT | AUDIT_ARCH_LE);
+    const AUDIT_ARCH_MACHINE: Option<u32> = Some(243);
     #[cfg(target_arch = "powerpc64")]
-    const AUDIT_ARCH: Option<u32> = Some(21 | AUDIT_ARCH_64BIT | AUDIT_ARCH_LE);
+    const AUDIT_ARCH_MACHINE: Option<u32> = Some(21);
     #[cfg(target_arch = "loongarch64")]
-    const AUDIT_ARCH: Option<u32> = Some(258 | AUDIT_ARCH_64BIT | AUDIT_ARCH_LE);
+    const AUDIT_ARCH_MACHINE: Option<u32> = Some(258);
     #[cfg(not(any(
         target_arch = "x86_64",
         target_arch = "aarch64",
@@ -63,7 +62,14 @@ mod imp {
         target_arch = "powerpc64",
         target_arch = "loongarch64"
     )))]
-    const AUDIT_ARCH: Option<u32> = None;
+    const AUDIT_ARCH_MACHINE: Option<u32> = None;
+
+    /// Value the kernel reports in `seccomp_data.arch`, combined as in
+    /// `linux/audit.h`.
+    const AUDIT_ARCH: Option<u32> = match AUDIT_ARCH_MACHINE {
+        Some(machine) => Some(machine | AUDIT_ARCH_64BIT | AUDIT_ARCH_LE),
+        None => None,
+    };
 
     // `struct seccomp_data` is `{ int nr; __u32 arch; __u64 ip; __u64 args[6]; }`.
     const NR_OFFSET: u32 = 0;
@@ -325,9 +331,16 @@ mod imp {
             libc::SYS_clone3,
         ];
 
-        // loongarch64 landed after `__ARCH_WANT_NEW_STAT` was retired,
-        // so it reaches `statx` above for every stat variant.
-        #[cfg(not(target_arch = "loongarch64"))]
+        // loongarch64 landed after `__ARCH_WANT_NEW_STAT` was retired, so it
+        // reaches `statx` above for every stat variant. Listing the vetted
+        // architectures positively also keeps the module compiling on ports
+        // such as sparc64, where libc has no `SYS_newfstatat`.
+        #[cfg(any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "riscv64",
+            target_arch = "powerpc64"
+        ))]
         allowed.extend_from_slice(&[libc::SYS_fstat, libc::SYS_newfstatat]);
 
         // Pre-`at` aliases that glibc still calls into on the ports
