@@ -407,10 +407,18 @@ mod imp {
             }
         }
 
+        /// `None` on 64-bit targets that have no vetted allowlist, where
+        /// `imp` still compiles but there is no filter to exercise.
+        fn vetted_program() -> Option<(u32, Vec<libc::sock_filter>)> {
+            let arch = AUDIT_ARCH?;
+            Some((arch, build_program(arch).expect("filter builds")))
+        }
+
         #[test]
         fn allowlisted_syscalls_pass_and_others_are_denied() {
-            let arch = AUDIT_ARCH.expect("host architecture is supported");
-            let program = build_program(arch).expect("filter builds");
+            let Some((arch, program)) = vetted_program() else {
+                return;
+            };
 
             for nr in allowed_syscalls() {
                 let nr = u32::try_from(nr).unwrap();
@@ -423,8 +431,9 @@ mod imp {
 
         #[test]
         fn clone_is_allowed_only_without_namespace_flags() {
-            let arch = AUDIT_ARCH.expect("host architecture is supported");
-            let program = build_program(arch).expect("filter builds");
+            let Some((arch, program)) = vetted_program() else {
+                return;
+            };
             let clone = u32::try_from(libc::SYS_clone).unwrap();
 
             let thread_flags = (libc::CLONE_VM | libc::CLONE_FS | libc::CLONE_THREAD) as u64;
@@ -437,8 +446,9 @@ mod imp {
 
         #[test]
         fn foreign_architecture_is_killed() {
-            let arch = AUDIT_ARCH.expect("host architecture is supported");
-            let program = build_program(arch).expect("filter builds");
+            let Some((arch, program)) = vetted_program() else {
+                return;
+            };
             let read = u32::try_from(libc::SYS_read).unwrap();
 
             assert_eq!(run(&program, arch ^ 1, read, 0), RET_KILL);

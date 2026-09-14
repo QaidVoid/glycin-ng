@@ -79,7 +79,8 @@ pub enum SeccompPosture {
     /// Filter program installed on the decode thread.
     Enforced,
     /// Kernel rejected the filter, or the platform has no seccomp
-    /// support and no vetted syscall allowlist.
+    /// support, or no vetted syscall allowlist exists for the
+    /// architecture.
     Unsupported {
         /// Short reason string for logging.
         reason: &'static str,
