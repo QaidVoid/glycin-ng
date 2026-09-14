@@ -1,4 +1,10 @@
 
+## 0.5.0 — 2026-09-14
+
+### Features
+
+- **sandbox:** Support seccomp on ppc64, ppc64le and loongarch64 (#25)
+
 ## 0.4.2 — 2026-08-19
 
 ### Bug Fixes
