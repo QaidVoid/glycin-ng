@@ -4,24 +4,18 @@
 //! the link search path, and two rpath entries cover the installed
 //! layout (`$ORIGIN`) and the cargo workspace layout where test
 //! binaries live one level down from the cdylib (`$ORIGIN/..`).
-//! Additionally a linker version script restricts the export table
-//! to the `rsvg_*` ABI.
+//! rustc already restricts the export table to the `rsvg_*` ABI.
 
 use std::env;
 use std::path::PathBuf;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=librsvg_shim.ld");
     println!("cargo:rerun-if-env-changed=GLYCIN_NG_LIB_DIR");
 
     let manifest = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
 
     println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,librsvg-2.so.2");
-    println!(
-        "cargo:rustc-cdylib-link-arg=-Wl,--version-script={}/librsvg_shim.ld",
-        manifest
-    );
     println!("cargo:rustc-link-lib=dylib=glycin_ng");
 
     // Real librsvg carries these NEEDED entries itself; consumers
