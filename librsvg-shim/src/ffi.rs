@@ -139,7 +139,19 @@ pub const G_PARAM_DEPRECATED: c_uint = 1 << 31;
 #[allow(dead_code)]
 unsafe extern "C" {
     pub fn g_object_get_type() -> GType;
-    pub fn g_object_new(object_type: GType, first_property_name: *const c_char) -> *mut GObject;
+    // `g_object_new` is variadic in GLib. Under the ppc64 ELFv2 ABI a
+    // variadic callee spills its unused argument registers into a save
+    // area the caller must reserve, which rustc does not do for these
+    // calls, so the spills can clobber the caller's saved link register.
+    // `g_object_new (type, NULL)` is exactly
+    // `g_object_new_with_properties (type, 0, NULL, NULL)`, so call the
+    // non-variadic entry point instead.
+    pub fn g_object_new_with_properties(
+        object_type: GType,
+        n_properties: c_uint,
+        names: *const *const c_char,
+        values: *const c_void,
+    ) -> *mut GObject;
     pub fn g_object_ref(object: gpointer) -> gpointer;
     pub fn g_object_unref(object: gpointer);
 
@@ -257,7 +269,12 @@ mod test_stubs {
     pub unsafe extern "C" fn g_object_get_type() -> GType {
         80
     }
-    pub unsafe extern "C" fn g_object_new(_: GType, _: *const c_char) -> *mut GObject {
+    pub unsafe extern "C" fn g_object_new_with_properties(
+        _: GType,
+        _: c_uint,
+        _: *const *const c_char,
+        _: *const c_void,
+    ) -> *mut GObject {
         std::ptr::null_mut()
     }
     pub unsafe extern "C" fn g_object_ref(p: gpointer) -> gpointer {

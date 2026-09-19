@@ -103,7 +103,15 @@ pub fn set_dpi_values(state: &mut HandleState, dpi_x: Option<f64>, dpi_y: Option
 }
 
 fn new_handle() -> *mut RsvgHandle {
-    unsafe { ffi::g_object_new(gobject::rsvg_handle_get_type(), ptr::null()) }.cast()
+    unsafe {
+        ffi::g_object_new_with_properties(
+            gobject::rsvg_handle_get_type(),
+            0,
+            ptr::null(),
+            ptr::null(),
+        )
+    }
+    .cast()
 }
 
 /// Returns a new, unloaded `RsvgHandle`.
