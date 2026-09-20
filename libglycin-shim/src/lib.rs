@@ -58,7 +58,8 @@ fn gobject_type() -> GType {
 }
 
 unsafe fn attach_state<T: 'static>(state: T) -> *mut GObject {
-    let obj = unsafe { ffi::g_object_new(gobject_type(), ptr::null()) };
+    let obj =
+        unsafe { ffi::g_object_new_with_properties(gobject_type(), 0, ptr::null(), ptr::null()) };
     if obj.is_null() {
         return ptr::null_mut();
     }

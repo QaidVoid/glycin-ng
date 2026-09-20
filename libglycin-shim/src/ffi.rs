@@ -112,7 +112,20 @@ pub struct GError {
 #[allow(dead_code)]
 unsafe extern "C" {
     pub fn g_object_get_type() -> GType;
-    pub fn g_object_new(object_type: GType, first_property_name: *const c_char) -> *mut GObject;
+    // `g_object_new` is variadic in GLib. On the ppc64 ELFv2 ABI a
+    // variadic callee spills its unused argument registers into a save
+    // area the caller must reserve. rustc does not reserve it for these
+    // calls, so the spills land in the caller's stack frame and clobber
+    // its saved link register (gly_frame_request_new, 64-byte frame,
+    // crashes on return). `g_object_new` is just
+    // `g_object_new_with_properties` with zero properties, so call the
+    // non-variadic entry point instead.
+    pub fn g_object_new_with_properties(
+        object_type: GType,
+        n_properties: c_uint,
+        names: *const *const c_char,
+        values: *const c_void,
+    ) -> *mut GObject;
     pub fn g_object_set_data_full(
         object: *mut GObject,
         key: *const c_char,
@@ -220,7 +233,12 @@ mod test_stubs {
     pub unsafe extern "C" fn g_object_get_type() -> GType {
         80
     }
-    pub unsafe extern "C" fn g_object_new(_: GType, _: *const c_char) -> *mut GObject {
+    pub unsafe extern "C" fn g_object_new_with_properties(
+        _: GType,
+        _: c_uint,
+        _: *const *const c_char,
+        _: *const c_void,
+    ) -> *mut GObject {
         std::ptr::null_mut()
     }
     pub unsafe extern "C" fn g_object_set_data_full(
