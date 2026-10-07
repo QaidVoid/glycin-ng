@@ -1094,34 +1094,23 @@ pub unsafe extern "C" fn glycin_ng_encoder_set_pixel_density(
     0
 }
 
-/// Request progressive (interlaced) encoding: -1 selects the codec
-/// default, 0 disables, any other value enables. Returns 0 on
-/// success, -1 when `encoder` is NULL or the target format does not
-/// support progressive encoding.
+/// Clear a previously-attached pixel density. Returns 0 on
+/// success, -1 when `encoder` is NULL.
 ///
 /// # Safety
 ///
 /// `encoder` must be a valid pointer returned by
 /// [`glycin_ng_encoder_new`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn glycin_ng_encoder_set_encoding_progressive(
+pub unsafe extern "C" fn glycin_ng_encoder_clear_pixel_density(
     encoder: *mut GlycinNgEncoder,
-    progressive: i8,
 ) -> c_int {
     clear_error();
     let Some(handle) = (unsafe { encoder.as_mut() }) else {
         set_error("encoder is null");
         return -1;
     };
-    let value = match progressive {
-        -1 => None,
-        0 => Some(false),
-        _ => Some(true),
-    };
-    if !handle.inner.set_encoding_progressive(value) {
-        set_error("target format does not support progressive encoding");
-        return -1;
-    }
+    handle.inner.set_pixel_density(None);
     0
 }
 

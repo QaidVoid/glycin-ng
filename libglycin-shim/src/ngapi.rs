@@ -182,10 +182,7 @@ unsafe extern "C" {
         y_value: f64,
         y_unit: c_int,
     ) -> c_int;
-    pub(crate) fn glycin_ng_encoder_set_encoding_progressive(
-        encoder: *mut GlycinNgEncoder,
-        progressive: i8,
-    ) -> c_int;
+    pub(crate) fn glycin_ng_encoder_clear_pixel_density(encoder: *mut GlycinNgEncoder) -> c_int;
     pub(crate) fn glycin_ng_encoder_add_metadata(
         encoder: *mut GlycinNgEncoder,
         key: *const c_char,

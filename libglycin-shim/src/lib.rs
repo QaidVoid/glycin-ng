@@ -1044,9 +1044,7 @@ mod symbol_coverage {
     //! entry point breaks ABI compatibility for apps built against
     //! upstream glycin, so this test fails the build if the set of
     //! exported `gly_*` functions ever shrinks below the 79 symbols
-    //! upstream's `glycin.h` declares for `libglycin-2.so.0` plus
-    //! `gly_new_frame_set_encoding_progressive` from unreleased main
-    //! (our engine honors it for PNG).
+    //! upstream's `glycin.h` declares for `libglycin-2.so.0` at 2.2.x.
 
     /// Every `gly_*` symbol the shim must export, referenced by
     /// address so the test stops compiling if one is deleted.
@@ -1127,7 +1125,6 @@ mod symbol_coverage {
             super::density::gly_frame_get_details as *const (),
             super::density::gly_frame_details_get_pixel_density as *const (),
             super::density::gly_new_frame_set_pixel_density as *const (),
-            super::density::gly_new_frame_set_encoding_progressive as *const (),
             super::gtypes::gly_physical_dimension_unit_get_type as *const (),
             super::gtypes::gly_color_mode_get_type as *const (),
             super::gtypes::gly_pixel_density_get_type as *const (),
@@ -1138,7 +1135,7 @@ mod symbol_coverage {
     #[test]
     fn exports_full_libglycin2_surface() {
         let exports = exports();
-        assert_eq!(exports.len(), 80, "expected 80 gly_* exports");
+        assert_eq!(exports.len(), 79, "expected 79 gly_* exports");
         assert!(exports.iter().all(|&addr| !addr.is_null()));
     }
 }

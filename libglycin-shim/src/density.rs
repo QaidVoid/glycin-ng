@@ -227,9 +227,10 @@ pub unsafe extern "C" fn gly_frame_details_get_pixel_density(
 // ----- gly_new_frame_set_pixel_density -----
 
 /// Attach pixel density to a new frame. Forwards to the encoder;
-/// formats that cannot embed density (anything but PNG, JPEG, TIFF)
-/// report unsupported (FALSE), while NULL (clear) succeeds. Matches
-/// the upstream `gboolean` return.
+/// formats that cannot embed density (anything but PNG, JPEG, TIFF
+/// with the corresponding codec feature enabled) report unsupported
+/// (FALSE), while NULL clears a previously-set density and succeeds.
+/// Matches the upstream `gboolean` return.
 ///
 /// # Safety
 /// `new_frame` must be valid or NULL; `pixel_density` may be NULL.
@@ -239,7 +240,13 @@ pub unsafe extern "C" fn gly_new_frame_set_pixel_density(
     pixel_density: *mut GObject,
 ) -> gboolean {
     if pixel_density.is_null() {
-        return unsafe { state_ref::<crate::types::CreatorState>(new_frame) }.is_some() as gboolean;
+        let rc = with_encoder(
+            new_frame,
+            ptr::null_mut(),
+            "gly_new_frame_set_pixel_density",
+            |enc| unsafe { ngapi::glycin_ng_encoder_clear_pixel_density(enc) },
+        );
+        return matches!(rc, Some(0)) as gboolean;
     }
     let Some(density) = (unsafe { state_ref::<PixelDensity>(pixel_density) }) else {
         return 0;
@@ -257,32 +264,6 @@ pub unsafe extern "C" fn gly_new_frame_set_pixel_density(
                 density.y.unit as c_int,
             )
         },
-    );
-    matches!(rc, Some(0)) as gboolean
-}
-
-/// Enable progressive encoding. Forwards to the encoder; only PNG
-/// honors this, other formats accept only `-1` (default).
-///
-/// Upstream header declares the second parameter as `int8_t *` but
-/// the implementation takes `int8_t` by value; this follows the
-/// implementation ABI.
-///
-/// # Safety
-/// `new_frame` must be valid or NULL.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn gly_new_frame_set_encoding_progressive(
-    new_frame: *mut GObject,
-    progressive: i8,
-) -> gboolean {
-    if progressive == -1 {
-        return unsafe { state_ref::<crate::types::CreatorState>(new_frame) }.is_some() as gboolean;
-    }
-    let rc = with_encoder(
-        new_frame,
-        ptr::null_mut(),
-        "gly_new_frame_set_encoding_progressive",
-        |enc| unsafe { ngapi::glycin_ng_encoder_set_encoding_progressive(enc, progressive) },
     );
     matches!(rc, Some(0)) as gboolean
 }
@@ -433,14 +414,6 @@ mod tests {
             // Upstream declares gboolean; NULL handles report unsupported.
             assert_eq!(
                 gly_new_frame_set_pixel_density(ptr::null_mut(), ptr::null_mut()),
-                0
-            );
-            assert_eq!(
-                gly_new_frame_set_encoding_progressive(ptr::null_mut(), 1),
-                0
-            );
-            assert_eq!(
-                gly_new_frame_set_encoding_progressive(ptr::null_mut(), -1),
                 0
             );
         }

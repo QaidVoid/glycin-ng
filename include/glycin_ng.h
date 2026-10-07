@@ -164,8 +164,7 @@ int glycin_ng_encoder_set_icc_profile(GlycinNgEncoder* encoder,
 int glycin_ng_encoder_set_pixel_density(GlycinNgEncoder* encoder,
                                         double x_value, int x_unit,
                                         double y_value, int y_unit);
-int glycin_ng_encoder_set_encoding_progressive(GlycinNgEncoder* encoder,
-                                               int8_t progressive);
+int glycin_ng_encoder_clear_pixel_density(GlycinNgEncoder* encoder);
 int glycin_ng_encoder_add_metadata(GlycinNgEncoder* encoder,
                                    const char* key, const char* value);
 int glycin_ng_encoder_add_frame(GlycinNgEncoder* encoder,

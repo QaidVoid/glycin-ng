@@ -55,7 +55,6 @@ pub struct Encoder {
     icc_profile: Option<Vec<u8>>,
     metadata: Vec<(String, String)>,
     pixel_density: Option<PixelDensity>,
-    progressive: Option<bool>,
 }
 
 impl Encoder {
@@ -75,7 +74,6 @@ impl Encoder {
             icc_profile: None,
             metadata: Vec::new(),
             pixel_density: None,
-            progressive: None,
         })
     }
 
@@ -137,17 +135,6 @@ impl Encoder {
         true
     }
 
-    /// Request progressive (interlaced) encoding, `None` for the
-    /// codec default. Returns whether the target accepts the value:
-    /// only PNG honors this today; other formats accept only `None`.
-    pub fn set_encoding_progressive(&mut self, progressive: Option<bool>) -> bool {
-        if progressive.is_some() && !supports_progressive(self.target) {
-            return false;
-        }
-        self.progressive = progressive;
-        true
-    }
-
     /// Encode the queued frames into a byte buffer.
     ///
     /// Takes `&self` so callers can encode through a shared handle
@@ -206,18 +193,16 @@ fn is_supported(target: KnownFormat) -> bool {
 }
 
 /// Targets that can embed pixel density (upstream marks
-/// `CreatorPixelDensity` for JPEG, PNG, and TIFF).
+/// `CreatorPixelDensity` for JPEG, PNG, and TIFF). PNG and TIFF
+/// support is only reported when the corresponding codec feature is
+/// enabled, since the fallback encoders cannot write density.
 fn supports_density(target: KnownFormat) -> bool {
-    matches!(
-        target,
-        KnownFormat::Png | KnownFormat::Jpeg | KnownFormat::Tiff
-    )
-}
-
-/// Targets that honor progressive encoding (upstream marks
-/// `CreatorEncodingProgressive` for PNG only, via Adam7 interlace).
-fn supports_progressive(target: KnownFormat) -> bool {
-    matches!(target, KnownFormat::Png)
+    match target {
+        KnownFormat::Jpeg => true,
+        KnownFormat::Png => cfg!(feature = "png"),
+        KnownFormat::Tiff => cfg!(feature = "tiff"),
+        _ => false,
+    }
 }
 
 #[cfg(not(feature = "encode"))]
@@ -275,9 +260,8 @@ fn encode_dispatch(_cfg: &Encoder, _rgba: Vec<u8>, _width: u32, _height: u32) ->
 }
 
 /// Encode PNG with the `png` crate directly so pixel density
-/// (`pHYs`, converted to meters like upstream) and Adam7 interlace
-/// for progressive mode can be written. The `image`-crate encoder
-/// exposes neither.
+/// (`pHYs`, converted to meters like upstream) can be written. The
+/// `image`-crate encoder exposes no density hook.
 #[cfg(all(feature = "encode", feature = "png"))]
 fn encode_png(
     cfg: &Encoder,
@@ -302,7 +286,6 @@ fn encode_png(
             unit: png::Unit::Meter,
         });
     }
-    info.interlaced = cfg.progressive == Some(true);
 
     let mut enc = png::Encoder::with_info(out, info).map_err(|e| ImageError::IoError(e.into()))?;
     enc.set_color(png::ColorType::Rgba);
@@ -738,24 +721,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "encode")]
-    #[test]
-    fn progressive_rejected_except_png() {
-        for target in [
-            KnownFormat::Jpeg,
-            KnownFormat::Gif,
-            KnownFormat::WebP,
-            KnownFormat::Tiff,
-            KnownFormat::Bmp,
-        ] {
-            let mut enc = Encoder::new(target).unwrap();
-            assert!(!enc.set_encoding_progressive(Some(true)), "{target:?}");
-            assert!(enc.set_encoding_progressive(None), "{target:?}");
-        }
-        let mut enc = Encoder::new(KnownFormat::Png).unwrap();
-        assert!(enc.set_encoding_progressive(Some(true)));
-    }
-
     #[cfg(all(feature = "encode", feature = "png"))]
     #[test]
     fn png_encode_embeds_meter_density() {
@@ -778,22 +743,6 @@ mod tests {
             "{}",
             density.x_value
         );
-    }
-
-    #[cfg(all(feature = "encode", feature = "png"))]
-    #[test]
-    fn png_progressive_sets_adam7() {
-        let mut enc = Encoder::new(KnownFormat::Png).unwrap();
-        enc.add_frame(rgba_frame());
-        enc.set_encoding_progressive(Some(true));
-        let bytes = enc.encode().expect("encode should succeed");
-        // IHDR interlace byte: 8 magic + 4 len + 4 type + 12 header.
-        assert_eq!(bytes[28], 1, "Adam7 interlace flag");
-
-        let mut plain = Encoder::new(KnownFormat::Png).unwrap();
-        plain.add_frame(rgba_frame());
-        let bytes = plain.encode().expect("encode should succeed");
-        assert_eq!(bytes[28], 0, "no interlace by default");
     }
 
     #[cfg(all(feature = "encode", feature = "jpeg"))]
