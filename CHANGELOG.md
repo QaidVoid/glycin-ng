@@ -1,4 +1,17 @@
 
+## 0.5.3 — 2026-10-07
+
+### Features
+
+- **engine:** Wire density and icc, fix gboolean return (#31)
+- **libglycin-shim:** Implement the glycin 2.2 API (#30)
+
+## 0.5.2 — 2026-09-21
+
+### Bug Fixes
+
+- Avoid variadic g_object_new in the shims on ppc64 (#28)
+
 ## 0.5.0 — 2026-09-14
 
 ### Features
