@@ -13,7 +13,7 @@ provides=('glycin')
 conflicts=('glycin')
 replaces=('glycin')
 # Upstream libglycin ABI version the shim implements.
-_glycin_ver=2.1.5
+_glycin_ver=2.2.2
 source=("$pkgname::git+https://github.com/QaidVoid/glycin-ng.git#tag=$pkgver"
         "glycin-2-header::https://raw.githubusercontent.com/GNOME/glycin/$_glycin_ver/libglycin/include/glycin.h")
 sha256sums=('SKIP'

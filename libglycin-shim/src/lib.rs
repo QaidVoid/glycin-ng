@@ -23,7 +23,9 @@
 
 mod asyncops;
 mod cicp;
+mod colormode;
 mod convert;
+mod density;
 mod ffi;
 mod gtypes;
 mod memformat;
@@ -978,7 +980,7 @@ mod symbol_coverage {
     //! Guard the full `libglycin-2` export surface. Removing any
     //! entry point breaks ABI compatibility for apps built against
     //! upstream glycin, so this test fails the build if the set of
-    //! exported `gly_*` functions ever shrinks below the 63 symbols
+    //! exported `gly_*` functions ever shrinks below the 79 symbols
     //! upstream's `glycin.h` declares for `libglycin-2.so.0`.
 
     /// Every `gly_*` symbol the shim must export, referenced by
@@ -1048,13 +1050,29 @@ mod symbol_coverage {
             super::mimelist::gly_loader_get_mime_types as *const (),
             super::mimelist::gly_loader_get_mime_types_async as *const (),
             super::mimelist::gly_loader_get_mime_types_finish as *const (),
+            super::colormode::gly_frame_get_color_mode as *const (),
+            super::colormode::gly_frame_get_color_icc_profile as *const (),
+            super::colormode::gly_loader_set_color_convert_icc_srgb as *const (),
+            super::density::gly_pixel_density_new as *const (),
+            super::density::gly_pixel_density_get_x_value as *const (),
+            super::density::gly_pixel_density_get_x_unit as *const (),
+            super::density::gly_pixel_density_get_y_value as *const (),
+            super::density::gly_pixel_density_get_y_unit as *const (),
+            super::density::gly_pixel_density_convert as *const (),
+            super::density::gly_frame_get_details as *const (),
+            super::density::gly_frame_details_get_pixel_density as *const (),
+            super::density::gly_new_frame_set_pixel_density as *const (),
+            super::gtypes::gly_physical_dimension_unit_get_type as *const (),
+            super::gtypes::gly_color_mode_get_type as *const (),
+            super::gtypes::gly_pixel_density_get_type as *const (),
+            super::gtypes::gly_frame_details_get_type as *const (),
         ]
     }
 
     #[test]
     fn exports_full_libglycin2_surface() {
         let exports = exports();
-        assert_eq!(exports.len(), 63, "expected 63 gly_* exports");
+        assert_eq!(exports.len(), 79, "expected 79 gly_* exports");
         assert!(exports.iter().all(|&addr| !addr.is_null()));
     }
 }
