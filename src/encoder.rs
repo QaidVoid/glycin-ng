@@ -15,7 +15,7 @@ use std::io::Cursor;
 #[cfg(feature = "encode")]
 use image::{ExtendedColorType as ECT, ImageEncoder};
 
-use crate::{Error, KnownFormat, MemoryFormat, Result};
+use crate::{Error, KnownFormat, MemoryFormat, PixelDensity, Result};
 
 /// Maximum output-buffer size [`to_rgba8`] will allocate. 1 GiB
 /// covers any reasonable screenshot or photo while rejecting hostile
@@ -54,6 +54,8 @@ pub struct Encoder {
     compression: u8,
     icc_profile: Option<Vec<u8>>,
     metadata: Vec<(String, String)>,
+    pixel_density: Option<PixelDensity>,
+    progressive: Option<bool>,
 }
 
 impl Encoder {
@@ -72,6 +74,8 @@ impl Encoder {
             compression: 6,
             icc_profile: None,
             metadata: Vec::new(),
+            pixel_density: None,
+            progressive: None,
         })
     }
 
@@ -118,6 +122,30 @@ impl Encoder {
     pub fn add_metadata(&mut self, key: String, value: String) -> &mut Self {
         self.metadata.push((key, value));
         self
+    }
+
+    /// Attach (or clear, with `None`) a pixel density the encoder
+    /// will embed for codecs that can carry it (PNG `pHYs`, JPEG
+    /// JFIF, TIFF resolution tags). Returns whether the target
+    /// accepts the value: formats without density support accept
+    /// only `None`.
+    pub fn set_pixel_density(&mut self, density: Option<PixelDensity>) -> bool {
+        if density.is_some() && !supports_density(self.target) {
+            return false;
+        }
+        self.pixel_density = density;
+        true
+    }
+
+    /// Request progressive (interlaced) encoding, `None` for the
+    /// codec default. Returns whether the target accepts the value:
+    /// only PNG honors this today; other formats accept only `None`.
+    pub fn set_encoding_progressive(&mut self, progressive: Option<bool>) -> bool {
+        if progressive.is_some() && !supports_progressive(self.target) {
+            return false;
+        }
+        self.progressive = progressive;
+        true
     }
 
     /// Encode the queued frames into a byte buffer.
@@ -177,6 +205,21 @@ fn is_supported(target: KnownFormat) -> bool {
     )
 }
 
+/// Targets that can embed pixel density (upstream marks
+/// `CreatorPixelDensity` for JPEG, PNG, and TIFF).
+fn supports_density(target: KnownFormat) -> bool {
+    matches!(
+        target,
+        KnownFormat::Png | KnownFormat::Jpeg | KnownFormat::Tiff
+    )
+}
+
+/// Targets that honor progressive encoding (upstream marks
+/// `CreatorEncodingProgressive` for PNG only, via Adam7 interlace).
+fn supports_progressive(target: KnownFormat) -> bool {
+    matches!(target, KnownFormat::Png)
+}
+
 #[cfg(not(feature = "encode"))]
 fn is_supported(_target: KnownFormat) -> bool {
     false
@@ -186,18 +229,15 @@ fn is_supported(_target: KnownFormat) -> bool {
 fn encode_dispatch(cfg: &Encoder, rgba: Vec<u8>, width: u32, height: u32) -> Result<Vec<u8>> {
     let mut out = Cursor::new(Vec::new());
     let result = match cfg.target {
-        KnownFormat::Png => {
-            let mut enc = image::codecs::png::PngEncoder::new(&mut out);
-            if let Some(p) = cfg.icc_profile.as_ref() {
-                let _ = enc.set_icc_profile(p.clone());
-            }
-            enc.write_image(&rgba, width, height, ECT::Rgba8)
-        }
+        KnownFormat::Png => encode_png(cfg, &rgba, width, height, &mut out),
         KnownFormat::Jpeg => {
             let rgb = flatten_over_white(rgba);
             let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, cfg.quality);
             if let Some(p) = cfg.icc_profile.as_ref() {
                 let _ = enc.set_icc_profile(p.clone());
+            }
+            if let Some(density) = cfg.pixel_density {
+                enc.set_pixel_density(jpeg_density(density));
             }
             enc.write_image(&rgb, width, height, ECT::Rgb8)
         }
@@ -215,10 +255,7 @@ fn encode_dispatch(cfg: &Encoder, rgba: Vec<u8>, width: u32, height: u32) -> Res
             }
             enc.write_image(&rgba, width, height, ECT::Rgba8)
         }
-        KnownFormat::Tiff => {
-            let enc = image::codecs::tiff::TiffEncoder::new(&mut out);
-            enc.write_image(&rgba, width, height, ECT::Rgba8)
-        }
+        KnownFormat::Tiff => encode_tiff(cfg, &rgba, width, height, &mut out),
         KnownFormat::Bmp => {
             let enc = image::codecs::bmp::BmpEncoder::new(&mut out);
             enc.write_image(&rgba, width, height, ECT::Rgba8)
@@ -235,6 +272,164 @@ fn encode_dispatch(cfg: &Encoder, rgba: Vec<u8>, width: u32, height: u32) -> Res
 #[cfg(not(feature = "encode"))]
 fn encode_dispatch(_cfg: &Encoder, _rgba: Vec<u8>, _width: u32, _height: u32) -> Result<Vec<u8>> {
     Err(Error::UnsupportedFormat)
+}
+
+/// Encode PNG with the `png` crate directly so pixel density
+/// (`pHYs`, converted to meters like upstream) and Adam7 interlace
+/// for progressive mode can be written. The `image`-crate encoder
+/// exposes neither.
+#[cfg(all(feature = "encode", feature = "png"))]
+fn encode_png(
+    cfg: &Encoder,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    out: &mut Cursor<Vec<u8>>,
+) -> image::ImageResult<()> {
+    use image::ImageError;
+
+    let mut info = png::Info::with_size(width, height);
+    if let Some(p) = cfg.icc_profile.as_ref() {
+        info.icc_profile = Some(std::borrow::Cow::Borrowed(p.as_slice()));
+    }
+    if let Some(density) = cfg.pixel_density {
+        let meter = density.convert(crate::PhysicalDimensionUnit::Meter);
+        let x = meter.x_value.round().clamp(1.0, u32::MAX as f64) as u32;
+        let y = meter.y_value.round().clamp(1.0, u32::MAX as f64) as u32;
+        info.pixel_dims = Some(png::PixelDimensions {
+            xppu: x,
+            yppu: y,
+            unit: png::Unit::Meter,
+        });
+    }
+    info.interlaced = cfg.progressive == Some(true);
+
+    let mut enc = png::Encoder::with_info(out, info).map_err(|e| ImageError::IoError(e.into()))?;
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    let mut writer = enc
+        .write_header()
+        .map_err(|e| ImageError::IoError(e.into()))?;
+    writer
+        .write_image_data(rgba)
+        .map_err(|e| ImageError::IoError(e.into()))
+}
+
+/// PNG fallback when the `png` decode feature is off: the
+/// `image`-crate encoder without density or interlace support.
+#[cfg(all(feature = "encode", not(feature = "png")))]
+fn encode_png(
+    cfg: &Encoder,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    out: &mut Cursor<Vec<u8>>,
+) -> image::ImageResult<()> {
+    let mut enc = image::codecs::png::PngEncoder::new(out);
+    if let Some(p) = cfg.icc_profile.as_ref() {
+        let _ = enc.set_icc_profile(p.clone());
+    }
+    enc.write_image(rgba, width, height, ECT::Rgba8)
+}
+
+/// Map engine density to the `image`-crate JPEG density: centimeter
+/// stays centimeter, every other unit converts to inch (like
+/// upstream). Values round to `u16`, clamped to the valid range.
+#[cfg(feature = "encode")]
+fn jpeg_density(density: PixelDensity) -> image::codecs::jpeg::PixelDensity {
+    use image::codecs::jpeg::{PixelDensity as JpegDensity, PixelDensityUnit as JpegUnit};
+
+    let (unit, jpeg_unit) = if density.x_unit == crate::PhysicalDimensionUnit::Centimeter {
+        (
+            crate::PhysicalDimensionUnit::Centimeter,
+            JpegUnit::Centimeters,
+        )
+    } else {
+        (crate::PhysicalDimensionUnit::Inch, JpegUnit::Inches)
+    };
+    let converted = density.convert(unit);
+    let round = |v: f64| v.round().clamp(1.0, u16::MAX as f64) as u16;
+    JpegDensity {
+        density: (round(converted.x_value), round(converted.y_value)),
+        unit: jpeg_unit,
+    }
+}
+
+/// Encode TIFF with the `tiff` crate directly so resolution tags can
+/// be written. The `image`-crate encoder exposes no tag hooks.
+#[cfg(all(feature = "encode", feature = "tiff"))]
+fn encode_tiff(
+    cfg: &Encoder,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    out: &mut Cursor<Vec<u8>>,
+) -> image::ImageResult<()> {
+    use tiff::encoder::{TiffEncoder, colortype::RGBA8};
+    use tiff::tags::ResolutionUnit;
+
+    let mut enc = TiffEncoder::new(out).map_err(tiff_error)?;
+    let mut img = enc.new_image::<RGBA8>(width, height).map_err(tiff_error)?;
+    if let Some(density) = cfg.pixel_density {
+        let (unit, tiff_unit) = if density.x_unit == crate::PhysicalDimensionUnit::Centimeter {
+            (
+                crate::PhysicalDimensionUnit::Centimeter,
+                ResolutionUnit::Centimeter,
+            )
+        } else {
+            (crate::PhysicalDimensionUnit::Inch, ResolutionUnit::Inch)
+        };
+        let converted = density.convert(unit);
+        img.x_resolution(float_rational(converted.x_value));
+        img.y_resolution(float_rational(converted.y_value));
+        img.resolution_unit(tiff_unit);
+    }
+    img.write_data(rgba).map_err(tiff_error)?;
+    Ok(())
+}
+
+/// Map a `tiff`-crate error into an `image` error so the dispatch
+/// keeps a single error type.
+#[cfg(all(feature = "encode", feature = "tiff"))]
+fn tiff_error(e: tiff::TiffError) -> image::ImageError {
+    image::ImageError::IoError(std::io::Error::other(e.to_string()))
+}
+
+/// TIFF fallback when the `tiff` decode feature is off: the
+/// `image`-crate encoder without resolution support.
+#[cfg(all(feature = "encode", not(feature = "tiff")))]
+fn encode_tiff(
+    _cfg: &Encoder,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    out: &mut Cursor<Vec<u8>>,
+) -> image::ImageResult<()> {
+    let enc = image::codecs::tiff::TiffEncoder::new(out);
+    enc.write_image(rgba, width, height, ECT::Rgba8)
+}
+
+/// Approximate a positive float as a TIFF RATIONAL, reduced to
+/// lowest terms at micro precision.
+#[cfg(all(feature = "encode", feature = "tiff"))]
+fn float_rational(value: f64) -> tiff::encoder::Rational {
+    use tiff::encoder::Rational;
+
+    let scaled = (value * 1_000_000.0).round().clamp(1.0, u32::MAX as f64) as u32;
+    let mut n = scaled;
+    let mut d = 1_000_000u32;
+    let g = gcd(n, d);
+    n /= g;
+    d /= g;
+    Rational { n, d }
+}
+
+#[cfg(all(feature = "encode", feature = "tiff"))]
+fn gcd(mut a: u32, mut b: u32) -> u32 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a.max(1)
 }
 
 /// Convert raw pixel data from `format` into a flat RGBA8 row-major
@@ -508,5 +703,137 @@ mod tests {
         });
         let bytes = enc.encode().expect("encode should succeed");
         assert!(bytes.starts_with(b"\x89PNG"));
+    }
+
+    #[cfg(feature = "encode")]
+    fn rgba_frame() -> EncodeFrame {
+        EncodeFrame {
+            width: 4,
+            height: 4,
+            stride: 16,
+            format: MemoryFormat::R8g8b8a8,
+            data: vec![10, 20, 30, 255].repeat(16),
+        }
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn density_rejected_for_formats_without_support() {
+        use crate::density::{PhysicalDimensionUnit, PixelDensity};
+
+        let density = PixelDensity::new(
+            300.0,
+            PhysicalDimensionUnit::Inch,
+            300.0,
+            PhysicalDimensionUnit::Inch,
+        );
+        for target in [KnownFormat::Gif, KnownFormat::WebP, KnownFormat::Bmp] {
+            let mut enc = Encoder::new(target).unwrap();
+            assert!(!enc.set_pixel_density(Some(density)), "{target:?}");
+            assert!(enc.set_pixel_density(None), "{target:?}");
+        }
+        for target in [KnownFormat::Png, KnownFormat::Jpeg, KnownFormat::Tiff] {
+            let mut enc = Encoder::new(target).unwrap();
+            assert!(enc.set_pixel_density(Some(density)), "{target:?}");
+        }
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn progressive_rejected_except_png() {
+        for target in [
+            KnownFormat::Jpeg,
+            KnownFormat::Gif,
+            KnownFormat::WebP,
+            KnownFormat::Tiff,
+            KnownFormat::Bmp,
+        ] {
+            let mut enc = Encoder::new(target).unwrap();
+            assert!(!enc.set_encoding_progressive(Some(true)), "{target:?}");
+            assert!(enc.set_encoding_progressive(None), "{target:?}");
+        }
+        let mut enc = Encoder::new(KnownFormat::Png).unwrap();
+        assert!(enc.set_encoding_progressive(Some(true)));
+    }
+
+    #[cfg(all(feature = "encode", feature = "png"))]
+    #[test]
+    fn png_encode_embeds_meter_density() {
+        use crate::density::{PhysicalDimensionUnit, PixelDensity};
+
+        let mut enc = Encoder::new(KnownFormat::Png).unwrap();
+        enc.add_frame(rgba_frame());
+        enc.set_pixel_density(Some(PixelDensity::new(
+            300.0,
+            PhysicalDimensionUnit::Inch,
+            300.0,
+            PhysicalDimensionUnit::Inch,
+        )));
+        let bytes = enc.encode().expect("encode should succeed");
+        let image = crate::Loader::new_bytes(bytes).load().unwrap();
+        let density = image.pixel_density().expect("density");
+        assert_eq!(density.x_unit, PhysicalDimensionUnit::Meter);
+        assert!(
+            (density.x_value - 300.0 / 0.0254).abs() < 1.0,
+            "{}",
+            density.x_value
+        );
+    }
+
+    #[cfg(all(feature = "encode", feature = "png"))]
+    #[test]
+    fn png_progressive_sets_adam7() {
+        let mut enc = Encoder::new(KnownFormat::Png).unwrap();
+        enc.add_frame(rgba_frame());
+        enc.set_encoding_progressive(Some(true));
+        let bytes = enc.encode().expect("encode should succeed");
+        // IHDR interlace byte: 8 magic + 4 len + 4 type + 12 header.
+        assert_eq!(bytes[28], 1, "Adam7 interlace flag");
+
+        let mut plain = Encoder::new(KnownFormat::Png).unwrap();
+        plain.add_frame(rgba_frame());
+        let bytes = plain.encode().expect("encode should succeed");
+        assert_eq!(bytes[28], 0, "no interlace by default");
+    }
+
+    #[cfg(all(feature = "encode", feature = "jpeg"))]
+    #[test]
+    fn jpeg_encode_embeds_jfif_density() {
+        use crate::density::{PhysicalDimensionUnit, PixelDensity};
+
+        let mut enc = Encoder::new(KnownFormat::Jpeg).unwrap();
+        enc.add_frame(rgba_frame());
+        enc.set_pixel_density(Some(PixelDensity::new(
+            300.0,
+            PhysicalDimensionUnit::Inch,
+            300.0,
+            PhysicalDimensionUnit::Inch,
+        )));
+        let bytes = enc.encode().expect("encode should succeed");
+        assert_eq!(&bytes[..2], &[0xFF, 0xD8]);
+        let image = crate::Loader::new_bytes(bytes).load().unwrap();
+        let density = image.pixel_density().expect("density");
+        assert_eq!(density.x_unit, PhysicalDimensionUnit::Inch);
+        assert_eq!(density.x_value, 300.0);
+    }
+
+    #[cfg(all(feature = "encode", feature = "tiff"))]
+    #[test]
+    fn tiff_encode_embeds_resolution_tags() {
+        use crate::density::{PhysicalDimensionUnit, PixelDensity};
+
+        let mut enc = Encoder::new(KnownFormat::Tiff).unwrap();
+        enc.add_frame(rgba_frame());
+        enc.set_pixel_density(Some(PixelDensity::new(
+            300.0,
+            PhysicalDimensionUnit::Inch,
+            300.0,
+            PhysicalDimensionUnit::Inch,
+        )));
+        let bytes = enc.encode().expect("encode should succeed");
+        let image = crate::Loader::new_bytes(bytes).load().unwrap();
+        let density = image.pixel_density().expect("density");
+        assert_eq!(density.x_unit, PhysicalDimensionUnit::Inch);
+        assert_eq!(density.x_value, 300.0);
     }
 }

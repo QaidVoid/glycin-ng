@@ -161,6 +161,8 @@ impl Loader {
         })?;
         #[cfg(feature = "metadata")]
         crate::metadata::apply_orientation_if_present(&mut image, apply_transformations);
+        #[cfg(feature = "metadata")]
+        crate::metadata::apply_resolution_fallback(&mut image);
         image.set_sandbox_posture(posture);
         Ok(image)
     }

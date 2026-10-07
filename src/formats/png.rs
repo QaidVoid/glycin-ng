@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use png::{BitDepth, ColorType, DecodingError, Transformations};
 
-use crate::{Error, Frame, Image, MemoryFormat, Result, Texture};
+use crate::{
+    Error, Frame, Image, MemoryFormat, PhysicalDimensionUnit, PixelDensity, Result, Texture,
+};
 
 use super::DecodeOptions;
 
@@ -95,11 +97,33 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     if let Some(e) = exif {
         image.set_exif(e);
     }
+    if let Some(density) = pixel_density(reader.info()) {
+        image.set_pixel_density(density);
+    }
     #[cfg(feature = "metadata")]
     extract_metadata(&mut image, reader.info());
 
     let _ = opts.apply_transformations;
     Ok(image)
+}
+
+/// Pixel density from the `pHYs` chunk. Only meter units carry an
+/// absolute density; unspecified units encode an aspect ratio, which
+/// reports as absent (matching upstream gufo).
+fn pixel_density(info: &png::Info) -> Option<PixelDensity> {
+    let dims = info.pixel_dims.as_ref()?;
+    if !matches!(dims.unit, png::Unit::Meter) {
+        return None;
+    }
+    if dims.xppu == 0 || dims.yppu == 0 {
+        return None;
+    }
+    Some(PixelDensity::new(
+        dims.xppu as f64,
+        PhysicalDimensionUnit::Meter,
+        dims.yppu as f64,
+        PhysicalDimensionUnit::Meter,
+    ))
 }
 
 /// Project the PNG's text chunks and CICP code points onto the image.
@@ -269,11 +293,33 @@ mod tests {
     }
 
     #[test]
+    fn reports_phys_density_in_meters() {
+        let mut out = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut out, 2, 2);
+            enc.set_color(ColorType::Rgba);
+            enc.set_depth(BitDepth::Eight);
+            enc.set_pixel_dims(Some(png::PixelDimensions {
+                xppu: 2835,
+                yppu: 2835,
+                unit: png::Unit::Meter,
+            }));
+            let mut writer = enc.write_header().unwrap();
+            writer.write_image_data(&vec![0x80; 2 * 2 * 4]).unwrap();
+        }
+        let image = decode(&out, &opts()).unwrap();
+        let density = image.pixel_density().expect("density");
+        assert_eq!(density.x_value, 2835.0);
+        assert_eq!(density.y_value, 2835.0);
+        assert_eq!(density.x_unit, PhysicalDimensionUnit::Meter);
+        assert_eq!(density.y_unit, PhysicalDimensionUnit::Meter);
+    }
+
+    #[test]
     fn rejects_garbage() {
         let err = decode(b"not a png", &opts()).unwrap_err();
         assert!(matches!(err, Error::Malformed(_) | Error::Io(_)));
     }
-
     #[test]
     fn rejects_corrupt_header() {
         let mut bytes = make_png(4, 4, ColorType::Rgba, BitDepth::Eight);

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use crate::{MemoryFormat, SandboxPosture};
+use crate::{MemoryFormat, PixelDensity, SandboxPosture};
 
 /// EXIF orientation values, in TIFF orientation-tag order.
 ///
@@ -194,6 +194,7 @@ pub struct Image {
     exif: Option<Vec<u8>>,
     metadata_key_value: Option<std::collections::BTreeMap<String, String>>,
     cicp: Option<[u8; 4]>,
+    pixel_density: Option<PixelDensity>,
     frames: Vec<Frame>,
     sandbox_posture: SandboxPosture,
 }
@@ -221,6 +222,7 @@ impl Image {
             exif: None,
             metadata_key_value: None,
             cicp: None,
+            pixel_density: None,
             frames,
             sandbox_posture: SandboxPosture::none(),
         }
@@ -252,6 +254,11 @@ impl Image {
     /// video_full_range_flag]`.
     pub fn set_cicp(&mut self, cicp: [u8; 4]) {
         self.cicp = Some(cicp);
+    }
+
+    /// Attach pixel density (resolution) reported by the container.
+    pub fn set_pixel_density(&mut self, density: PixelDensity) {
+        self.pixel_density = Some(density);
     }
 
     pub(crate) fn set_sandbox_posture(&mut self, posture: SandboxPosture) {
@@ -313,6 +320,11 @@ impl Image {
     /// matrix_coefficients, video_full_range_flag]`, if present.
     pub fn cicp(&self) -> Option<[u8; 4]> {
         self.cicp
+    }
+
+    /// Pixel density reported by the container, if any.
+    pub fn pixel_density(&self) -> Option<PixelDensity> {
+        self.pixel_density
     }
 
     /// All decoded frames.

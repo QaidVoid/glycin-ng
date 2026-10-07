@@ -34,3 +34,17 @@ pub(crate) fn apply_orientation_if_present(image: &mut Image, apply: bool) {
     transform::bake_into_frames(image, orientation);
     image.set_orientation(Orientation::Normal);
 }
+
+/// Fill in pixel density from the EXIF resolution tags when the
+/// decoder did not report a container density. Container metadata
+/// (PNG `pHYs`, JPEG JFIF, TIFF tags) wins; this only runs when the
+/// image has no density yet.
+pub(crate) fn apply_resolution_fallback(image: &mut Image) {
+    if image.pixel_density().is_some() {
+        return;
+    }
+    let Some(blob) = image.exif() else { return };
+    if let Some(density) = exif::parse_resolution(blob) {
+        image.set_pixel_density(density);
+    }
+}
