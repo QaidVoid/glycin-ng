@@ -132,6 +132,11 @@ const char* glycin_ng_image_metadata_key_at(const GlycinNgImage* image,
 const char* glycin_ng_image_metadata_value(const GlycinNgImage* image,
                                            const char* key);
 int glycin_ng_image_cicp(const GlycinNgImage* image, uint8_t* out);
+const uint8_t* glycin_ng_image_icc_data(const GlycinNgImage* image);
+size_t glycin_ng_image_icc_len(const GlycinNgImage* image);
+int glycin_ng_image_pixel_density(const GlycinNgImage* image,
+                                  double* x_value, int* x_unit,
+                                  double* y_value, int* y_unit);
 
 /* Texture accessors. */
 uint32_t glycin_ng_texture_width(const GlycinNgTexture* texture);
@@ -156,6 +161,10 @@ void glycin_ng_encoder_set_compression(GlycinNgEncoder* encoder,
                                        uint8_t compression);
 int glycin_ng_encoder_set_icc_profile(GlycinNgEncoder* encoder,
                                       const uint8_t* data, size_t len);
+int glycin_ng_encoder_set_pixel_density(GlycinNgEncoder* encoder,
+                                        double x_value, int x_unit,
+                                        double y_value, int y_unit);
+int glycin_ng_encoder_clear_pixel_density(GlycinNgEncoder* encoder);
 int glycin_ng_encoder_add_metadata(GlycinNgEncoder* encoder,
                                    const char* key, const char* value);
 int glycin_ng_encoder_add_frame(GlycinNgEncoder* encoder,

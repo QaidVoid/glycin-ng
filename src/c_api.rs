@@ -35,8 +35,8 @@ use std::ptr;
 use std::slice;
 
 use crate::{
-    EncodeFrame, Encoder, Error, Frame, Image, KnownFormat, Loader, MemoryFormat, SandboxSelector,
-    Texture,
+    EncodeFrame, Encoder, Error, Frame, Image, KnownFormat, Loader, MemoryFormat,
+    PhysicalDimensionUnit, PixelDensity, SandboxSelector, Texture,
 };
 
 /// Opaque [`Loader`] handle.
@@ -621,6 +621,61 @@ pub unsafe extern "C" fn glycin_ng_image_cicp(image: *const GlycinNgImage, out: 
     1
 }
 
+/// Embedded ICC profile bytes for the image, or NULL when the image
+/// has no profile or `image` is NULL. The pointer is valid for the
+/// lifetime of the image handle. Pair with
+/// [`glycin_ng_image_icc_len`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_image_icc_data(image: *const GlycinNgImage) -> *const u8 {
+    image_ref(image)
+        .and_then(|i| i.icc_profile())
+        .map(|b| b.as_ptr())
+        .unwrap_or(ptr::null())
+}
+
+/// Length in bytes of [`glycin_ng_image_icc_data`] (0 when absent or
+/// `image` is NULL).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_image_icc_len(image: *const GlycinNgImage) -> usize {
+    image_ref(image)
+        .and_then(|i| i.icc_profile())
+        .map(|b| b.len())
+        .unwrap_or(0)
+}
+
+/// Write the image's pixel density into the out parameters and
+/// return 1, or return 0 when the image has no density, `image` is
+/// NULL, or any out pointer is NULL. Units are
+/// `GlyPhysicalDimensionUnit` discriminants (1 = inch, 2 = pica,
+/// 3 = point, 4 = meter, 5 = centimeter, 6 = millimeter).
+///
+/// # Safety
+///
+/// When non-NULL, each out pointer must point to writable memory of
+/// its type.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_image_pixel_density(
+    image: *const GlycinNgImage,
+    x_value: *mut f64,
+    x_unit: *mut c_int,
+    y_value: *mut f64,
+    y_unit: *mut c_int,
+) -> c_int {
+    if x_value.is_null() || x_unit.is_null() || y_value.is_null() || y_unit.is_null() {
+        return 0;
+    }
+    let Some(density) = image_ref(image).and_then(|i| i.pixel_density()) else {
+        return 0;
+    };
+    unsafe {
+        *x_value = density.x_value;
+        *x_unit = density.x_unit as c_int;
+        *y_value = density.y_value;
+        *y_unit = density.y_unit as c_int;
+    }
+    1
+}
+
 /// Texture of the frame at `index` (NULL on out-of-bounds or NULL
 /// image). The pointer remains valid for the lifetime of the image
 /// handle.
@@ -992,6 +1047,71 @@ pub unsafe extern "C" fn glycin_ng_encoder_set_compression(
     if let Some(handle) = unsafe { encoder.as_mut() } {
         handle.inner.set_compression(compression);
     }
+}
+
+/// Attach a pixel density to the encoder. Units are
+/// `GlyPhysicalDimensionUnit` discriminants (1 = inch, 2 = pica,
+/// 3 = point, 4 = meter, 5 = centimeter, 6 = millimeter). Returns 0
+/// on success, -1 when `encoder` is NULL, a unit is unknown, a value
+/// is not positive and finite, or the target format cannot embed
+/// density.
+///
+/// # Safety
+///
+/// `encoder` must be a valid pointer returned by
+/// [`glycin_ng_encoder_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_encoder_set_pixel_density(
+    encoder: *mut GlycinNgEncoder,
+    x_value: f64,
+    x_unit: c_int,
+    y_value: f64,
+    y_unit: c_int,
+) -> c_int {
+    clear_error();
+    let Some(handle) = (unsafe { encoder.as_mut() }) else {
+        set_error("encoder is null");
+        return -1;
+    };
+    let (Some(x_unit), Some(y_unit)) = (
+        PhysicalDimensionUnit::from_discriminant(x_unit),
+        PhysicalDimensionUnit::from_discriminant(y_unit),
+    ) else {
+        set_error("unknown physical dimension unit");
+        return -1;
+    };
+    if !(x_value > 0.0 && y_value > 0.0 && x_value.is_finite() && y_value.is_finite()) {
+        set_error("pixel density values must be positive and finite");
+        return -1;
+    }
+    if !handle
+        .inner
+        .set_pixel_density(Some(PixelDensity::new(x_value, x_unit, y_value, y_unit)))
+    {
+        set_error("target format does not support pixel density");
+        return -1;
+    }
+    0
+}
+
+/// Clear a previously-attached pixel density. Returns 0 on
+/// success, -1 when `encoder` is NULL.
+///
+/// # Safety
+///
+/// `encoder` must be a valid pointer returned by
+/// [`glycin_ng_encoder_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn glycin_ng_encoder_clear_pixel_density(
+    encoder: *mut GlycinNgEncoder,
+) -> c_int {
+    clear_error();
+    let Some(handle) = (unsafe { encoder.as_mut() }) else {
+        set_error("encoder is null");
+        return -1;
+    };
+    handle.inner.set_pixel_density(None);
+    0
 }
 
 /// Attach an ICC profile to the encoder. Pass `data = NULL` and

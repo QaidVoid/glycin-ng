@@ -5,21 +5,17 @@
 //! `gufo_common::physical_dimension`, so a density read back from
 //! the shim matches what upstream would report for the same input.
 //!
-//! The engine does not parse physical density metadata (PNG `pHYs`,
-//! JPEG JFIF density, TIFF resolution tags) yet, so every
-//! `GlyFrameDetails` reports no density and
-//! `gly_frame_details_get_pixel_density` returns `NULL`. Upstream
-//! defines that property as nullable, and gdk-pixbuf skips the
-//! `x-dpi` / `y-dpi` options when it is `NULL`. Encoders likewise do
-//! not embed a density, so `gly_new_frame_set_pixel_density` accepts
-//! and drops it.
+//! Frame details carry the density the engine extracted on decode
+//! (PNG `pHYs`, JPEG JFIF/EXIF, TIFF tags, EXIF fallback); frames
+//! from containers without resolution metadata get a valid details
+//! handle whose density is absent (NULL).
 
 use std::ffi::c_int;
 use std::ptr;
 
-use crate::ffi::GObject;
+use crate::ffi::{GObject, gboolean};
 use crate::types::FrameState;
-use crate::{attach_state, state_ref};
+use crate::{attach_state, ngapi, state_ref, with_encoder};
 
 pub(crate) const GLY_PHYSICAL_DIMENSION_UNIT_INCH: c_int = 1;
 
@@ -195,17 +191,19 @@ pub unsafe extern "C" fn gly_pixel_density_convert(
 
 // ----- gly_frame_details_* / gly_frame_get_details -----
 
+/// Carry the frame's pixel density when the engine reported one.
+///
 /// # Safety
 /// `frame` must be valid or NULL. The caller owns the returned
 /// reference.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_frame_get_details(frame: *mut GObject) -> *mut GObject {
-    if unsafe { state_ref::<FrameState>(frame) }.is_none() {
+    let Some(state) = (unsafe { state_ref::<FrameState>(frame) }) else {
         return ptr::null_mut();
-    }
+    };
     unsafe {
         attach_state(FrameDetailsState {
-            pixel_density: None,
+            pixel_density: state.pixel_density,
         })
     }
 }
@@ -228,17 +226,46 @@ pub unsafe extern "C" fn gly_frame_details_get_pixel_density(
 
 // ----- gly_new_frame_set_pixel_density -----
 
-/// Accept a density for the encoded frame. The engine's encoders do
-/// not write density metadata, so the value is dropped. The caller
-/// keeps its reference to `pixel_density`.
+/// Attach pixel density to a new frame. Forwards to the encoder;
+/// formats that cannot embed density (anything but PNG, JPEG, TIFF
+/// with the corresponding codec feature enabled) report unsupported
+/// (FALSE), while NULL clears a previously-set density and succeeds.
+/// Matches the upstream `gboolean` return.
 ///
 /// # Safety
-/// Both arguments may be anything; nothing is read or written.
+/// `new_frame` must be valid or NULL; `pixel_density` may be NULL.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gly_new_frame_set_pixel_density(
-    _new_frame: *mut GObject,
-    _pixel_density: *mut GObject,
-) {
+    new_frame: *mut GObject,
+    pixel_density: *mut GObject,
+) -> gboolean {
+    if pixel_density.is_null() {
+        let rc = with_encoder(
+            new_frame,
+            ptr::null_mut(),
+            "gly_new_frame_set_pixel_density",
+            |enc| unsafe { ngapi::glycin_ng_encoder_clear_pixel_density(enc) },
+        );
+        return matches!(rc, Some(0)) as gboolean;
+    }
+    let Some(density) = (unsafe { state_ref::<PixelDensity>(pixel_density) }) else {
+        return 0;
+    };
+    let rc = with_encoder(
+        new_frame,
+        ptr::null_mut(),
+        "gly_new_frame_set_pixel_density",
+        |enc| unsafe {
+            ngapi::glycin_ng_encoder_set_pixel_density(
+                enc,
+                density.x.value,
+                density.x.unit as c_int,
+                density.y.value,
+                density.y.unit as c_int,
+            )
+        },
+    );
+    matches!(rc, Some(0)) as gboolean
 }
 
 #[cfg(test)]
@@ -384,7 +411,11 @@ mod tests {
             assert!(gly_pixel_density_convert(ptr::null_mut(), 0).is_null());
             assert!(gly_frame_get_details(ptr::null_mut()).is_null());
             assert!(gly_frame_details_get_pixel_density(ptr::null_mut()).is_null());
-            gly_new_frame_set_pixel_density(ptr::null_mut(), ptr::null_mut());
+            // Upstream declares gboolean; NULL handles report unsupported.
+            assert_eq!(
+                gly_new_frame_set_pixel_density(ptr::null_mut(), ptr::null_mut()),
+                0
+            );
         }
     }
 }

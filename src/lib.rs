@@ -34,6 +34,7 @@
 #[cfg(feature = "c-api")]
 pub mod c_api;
 
+mod density;
 mod encoder;
 mod error;
 mod formats;
@@ -46,6 +47,7 @@ mod metadata;
 pub mod sandbox;
 pub mod sniff;
 
+pub use crate::density::{PhysicalDimensionUnit, PixelDensity};
 pub use crate::encoder::{EncodeFrame, Encoder};
 pub use crate::error::{Error, Result};
 pub use crate::image::{Frame, Image, Orientation, Texture};

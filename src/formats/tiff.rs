@@ -2,9 +2,11 @@
 
 use std::io::Cursor;
 
-use tiff::{ColorType, decoder::DecodingResult};
+use tiff::{ColorType, decoder::DecodingResult, tags::Tag};
 
-use crate::{Error, Frame, Image, MemoryFormat, Result, Texture};
+use crate::{
+    Error, Frame, Image, MemoryFormat, PhysicalDimensionUnit, PixelDensity, Result, Texture,
+};
 
 use super::DecodeOptions;
 
@@ -31,6 +33,8 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
         }
     };
 
+    let density = resolution_density(&mut decoder);
+
     let result = decoder.read_image().map_err(map_err)?;
     let bytes_vec = match result {
         DecodingResult::U8(v) => v,
@@ -55,12 +59,48 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
         })?;
 
     let _ = opts.apply_transformations;
-    Ok(Image::from_parts(
-        "tiff",
-        width,
-        height,
-        vec![Frame::new(texture, None)],
-    ))
+    let mut image = Image::from_parts("tiff", width, height, vec![Frame::new(texture, None)]);
+    if let Some(density) = density {
+        image.set_pixel_density(density);
+    }
+    Ok(image)
+}
+
+/// Pixel density from the resolution tags. Requires `XResolution`
+/// and `YResolution` rationals plus `ResolutionUnit` (2 = inch,
+/// 3 = centimeter); anything missing or otherwise valued reports as
+/// absent (matching upstream gufo).
+fn resolution_density<R: std::io::Read + std::io::Seek>(
+    decoder: &mut tiff::decoder::Decoder<R>,
+) -> Option<PixelDensity> {
+    use tiff::decoder::ifd::Value;
+
+    fn rational(value: Value) -> Option<f64> {
+        match value {
+            Value::Rational(n, d) if d != 0 => Some(n as f64 / d as f64),
+            _ => None,
+        }
+    }
+
+    let x = decoder
+        .find_tag(Tag::XResolution)
+        .ok()
+        .flatten()
+        .and_then(rational)?;
+    let y = decoder
+        .find_tag(Tag::YResolution)
+        .ok()
+        .flatten()
+        .and_then(rational)?;
+    let unit = match decoder.find_tag_unsigned::<u16>(Tag::ResolutionUnit).ok()? {
+        Some(2) => PhysicalDimensionUnit::Inch,
+        Some(3) => PhysicalDimensionUnit::Centimeter,
+        _ => return None,
+    };
+    if x <= 0.0 || y <= 0.0 || !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    Some(PixelDensity::new(x, unit, y, unit))
 }
 
 fn u16_to_native_bytes(v: Vec<u16>) -> Vec<u8> {
@@ -101,5 +141,31 @@ mod tests {
             err,
             Error::Malformed(_) | Error::Io(_) | Error::Decoder { .. }
         ));
+    }
+
+    #[test]
+    fn reports_resolution_tags() {
+        use std::io::Cursor;
+        use tiff::encoder::{Rational, TiffEncoder, colortype};
+        use tiff::tags::ResolutionUnit;
+
+        let mut buf = Cursor::new(Vec::new());
+        {
+            let mut enc = TiffEncoder::new(&mut buf).unwrap();
+            let mut img = enc.new_image::<colortype::Gray8>(2, 2).unwrap();
+            img.resolution(ResolutionUnit::Inch, Rational { n: 300, d: 1 });
+            img.write_data(&[0u8; 4]).unwrap();
+        }
+        let bytes = buf.into_inner();
+        let opts = DecodeOptions {
+            limits: Limits::default(),
+            apply_transformations: true,
+            render_size_hint: None,
+        };
+        let image = decode(&bytes, &opts).unwrap();
+        let density = image.pixel_density().expect("density");
+        assert_eq!(density.x_value, 300.0);
+        assert_eq!(density.y_value, 300.0);
+        assert_eq!(density.x_unit, PhysicalDimensionUnit::Inch);
     }
 }

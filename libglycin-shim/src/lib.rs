@@ -479,8 +479,17 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
                 && let Some(raw) = extract_frame(new_image, 0, rerender.accepted_memory_formats)
             {
                 let cicp = fetch_cicp(new_image);
+                let icc_profile = fetch_icc(new_image);
+                let pixel_density = fetch_density(new_image);
                 unsafe { ngapi::glycin_ng_image_free(new_image) };
-                return unsafe { attach_state(FrameState { frame: raw, cicp }) };
+                return unsafe {
+                    attach_state(FrameState {
+                        frame: raw,
+                        cicp,
+                        icc_profile,
+                        pixel_density,
+                    })
+                };
             }
             if !new_image.is_null() {
                 unsafe { ngapi::glycin_ng_image_free(new_image) };
@@ -502,7 +511,16 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
         return ptr::null_mut();
     };
     let cicp = fetch_cicp(img_state.inner);
-    unsafe { attach_state(FrameState { frame: raw, cicp }) }
+    let icc_profile = fetch_icc(img_state.inner);
+    let pixel_density = fetch_density(img_state.inner);
+    unsafe {
+        attach_state(FrameState {
+            frame: raw,
+            cicp,
+            icc_profile,
+            pixel_density,
+        })
+    }
 }
 
 /// Read the image's CICP code points from the engine, if present.
@@ -510,6 +528,51 @@ fn fetch_cicp(image: *mut ngapi::GlycinNgImage) -> Option<[u8; 4]> {
     let mut buf = [0u8; 4];
     let present = unsafe { ngapi::glycin_ng_image_cicp(image, buf.as_mut_ptr()) };
     (present != 0).then_some(buf)
+}
+
+/// Read the image's ICC profile bytes from the engine, if present.
+fn fetch_icc(image: *mut ngapi::GlycinNgImage) -> Option<Vec<u8>> {
+    let data = unsafe { ngapi::glycin_ng_image_icc_data(image) };
+    let len = unsafe { ngapi::glycin_ng_image_icc_len(image) };
+    if data.is_null() || len == 0 {
+        return None;
+    }
+    Some(unsafe { slice::from_raw_parts(data, len) }.to_vec())
+}
+
+/// Read the image's pixel density from the engine, if present.
+fn fetch_density(image: *mut ngapi::GlycinNgImage) -> Option<crate::density::PixelDensity> {
+    use crate::density::{Axis, PixelDensity, Unit};
+
+    let mut x_value = 0.0;
+    let mut x_unit = 0;
+    let mut y_value = 0.0;
+    let mut y_unit = 0;
+    let present = unsafe {
+        ngapi::glycin_ng_image_pixel_density(
+            image,
+            &mut x_value,
+            &mut x_unit,
+            &mut y_value,
+            &mut y_unit,
+        )
+    };
+    if present == 0 {
+        return None;
+    }
+    let (Some(x_unit), Some(y_unit)) = (Unit::from_raw(x_unit), Unit::from_raw(y_unit)) else {
+        return None;
+    };
+    Some(PixelDensity {
+        x: Axis {
+            value: x_value,
+            unit: x_unit,
+        },
+        y: Axis {
+            value: y_value,
+            unit: y_unit,
+        },
+    })
 }
 
 // ----- gly_image_next_frame -----
@@ -981,7 +1044,7 @@ mod symbol_coverage {
     //! entry point breaks ABI compatibility for apps built against
     //! upstream glycin, so this test fails the build if the set of
     //! exported `gly_*` functions ever shrinks below the 79 symbols
-    //! upstream's `glycin.h` declares for `libglycin-2.so.0`.
+    //! upstream's `glycin.h` declares for `libglycin-2.so.0` at 2.2.x.
 
     /// Every `gly_*` symbol the shim must export, referenced by
     /// address so the test stops compiling if one is deleted.

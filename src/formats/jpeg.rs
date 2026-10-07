@@ -4,7 +4,9 @@ use std::io::Cursor;
 
 use jpeg_decoder::PixelFormat;
 
-use crate::{Error, Frame, Image, MemoryFormat, Result, Texture};
+use crate::{
+    Error, Frame, Image, MemoryFormat, PhysicalDimensionUnit, PixelDensity, Result, Texture,
+};
 
 use super::DecodeOptions;
 
@@ -51,8 +53,38 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     if let Some(profile) = decoder.icc_profile() {
         image.set_icc_profile(profile);
     }
+    if let Some(exif) = decoder.exif_data() {
+        image.set_exif(exif.to_vec());
+    }
+    if let Some(density) = jfif_density(bytes) {
+        image.set_pixel_density(density);
+    }
     let _ = opts.apply_transformations;
     Ok(image)
+}
+
+/// Pixel density from the JFIF APP0 header. Unit 1 is inch, 2 is
+/// centimeter; unit 0 carries only an aspect ratio and unknown units
+/// report as absent (matching upstream gufo).
+fn jfif_density(bytes: &[u8]) -> Option<PixelDensity> {
+    // SOI + APP0 marker + length + "JFIF\0" + version(2).
+    if bytes.len() < 18 || bytes[0..4] != [0xFF, 0xD8, 0xFF, 0xE0] {
+        return None;
+    }
+    if &bytes[6..11] != b"JFIF\0" {
+        return None;
+    }
+    let unit = match bytes[13] {
+        1 => PhysicalDimensionUnit::Inch,
+        2 => PhysicalDimensionUnit::Centimeter,
+        _ => return None,
+    };
+    let x = u16::from_be_bytes([bytes[14], bytes[15]]) as f64;
+    let y = u16::from_be_bytes([bytes[16], bytes[17]]) as f64;
+    if x <= 0.0 || y <= 0.0 {
+        return None;
+    }
+    Some(PixelDensity::new(x, unit, y, unit))
 }
 
 fn map_err(e: jpeg_decoder::Error) -> Error {
@@ -103,5 +135,37 @@ mod tests {
         };
         let err = decode(b"", &opts).unwrap_err();
         assert!(matches!(err, Error::Malformed(_) | Error::Io(_)));
+    }
+
+    fn jfif_header(unit: u8, x: u16, y: u16) -> Vec<u8> {
+        let mut b = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
+        b.extend_from_slice(b"JFIF\0");
+        b.extend_from_slice(&[0x01, 0x02, unit]);
+        b.extend_from_slice(&x.to_be_bytes());
+        b.extend_from_slice(&y.to_be_bytes());
+        b.extend_from_slice(&[0x00, 0x00]);
+        b
+    }
+
+    #[test]
+    fn parses_jfif_density_inch() {
+        let d = jfif_density(&jfif_header(1, 300, 300)).expect("density");
+        assert_eq!(d.x_value, 300.0);
+        assert_eq!(d.x_unit, PhysicalDimensionUnit::Inch);
+    }
+
+    #[test]
+    fn parses_jfif_density_centimeter() {
+        let d = jfif_density(&jfif_header(2, 118, 119)).expect("density");
+        assert_eq!(d.x_value, 118.0);
+        assert_eq!(d.y_value, 119.0);
+        assert_eq!(d.x_unit, PhysicalDimensionUnit::Centimeter);
+    }
+
+    #[test]
+    fn rejects_aspect_only_and_zero_density() {
+        assert_eq!(jfif_density(&jfif_header(0, 1, 1)), None);
+        assert_eq!(jfif_density(&jfif_header(1, 0, 300)), None);
+        assert_eq!(jfif_density(b"not a jpeg"), None);
     }
 }

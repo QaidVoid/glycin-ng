@@ -143,6 +143,15 @@ unsafe extern "C" {
         key: *const c_char,
     ) -> *const c_char;
     pub(crate) fn glycin_ng_image_cicp(image: *const GlycinNgImage, out: *mut u8) -> c_int;
+    pub(crate) fn glycin_ng_image_icc_data(image: *const GlycinNgImage) -> *const u8;
+    pub(crate) fn glycin_ng_image_icc_len(image: *const GlycinNgImage) -> usize;
+    pub(crate) fn glycin_ng_image_pixel_density(
+        image: *const GlycinNgImage,
+        x_value: *mut f64,
+        x_unit: *mut c_int,
+        y_value: *mut f64,
+        y_unit: *mut c_int,
+    ) -> c_int;
 
     // Texture accessors.
     pub(crate) fn glycin_ng_texture_width(texture: *const GlycinNgTexture) -> u32;
@@ -166,6 +175,14 @@ unsafe extern "C" {
         data: *const u8,
         len: usize,
     ) -> c_int;
+    pub(crate) fn glycin_ng_encoder_set_pixel_density(
+        encoder: *mut GlycinNgEncoder,
+        x_value: f64,
+        x_unit: c_int,
+        y_value: f64,
+        y_unit: c_int,
+    ) -> c_int;
+    pub(crate) fn glycin_ng_encoder_clear_pixel_density(encoder: *mut GlycinNgEncoder) -> c_int;
     pub(crate) fn glycin_ng_encoder_add_metadata(
         encoder: *mut GlycinNgEncoder,
         key: *const c_char,

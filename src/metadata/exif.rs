@@ -1,12 +1,18 @@
-//! Minimal EXIF parser focused on the Orientation tag.
+//! Minimal EXIF parser focused on Orientation and resolution.
 //!
 //! Strict enough to read the TIFF-formatted EXIF blob attached to
 //! PNG, JPEG, and WebP images and report the
-//! [Orientation](crate::Orientation) tag value (`0x0112`). Anything
-//! else returns `None` rather than erroring.
+//! [Orientation](crate::Orientation) tag value (`0x0112`) and the
+//! pixel density from the resolution tags (`0x011A`, `0x011B`,
+//! `0x0128`). Anything else returns `None` rather than erroring.
+
+use crate::{PhysicalDimensionUnit, PixelDensity};
 
 const EXIF_PREFIX: &[u8] = b"Exif\0\0";
 const ORIENTATION_TAG: u16 = 0x0112;
+const X_RESOLUTION_TAG: u16 = 0x011A;
+const Y_RESOLUTION_TAG: u16 = 0x011B;
+const RESOLUTION_UNIT_TAG: u16 = 0x0128;
 const IFD_ENTRY_BYTES: usize = 12;
 
 /// Read the Orientation tag value from an EXIF blob, if present.
@@ -46,6 +52,76 @@ pub(crate) fn parse_orientation(blob: &[u8]) -> Option<u16> {
         return Some(read_u16(&entry[8..10], big_endian));
     }
     None
+}
+
+/// Read pixel density from the EXIF resolution tags, if present.
+///
+/// Requires `XResolution` and `YResolution` (RATIONAL) plus
+/// `ResolutionUnit` (SHORT): 2 maps to inch, 3 to centimeter.
+/// Any other unit, missing tag, or non-positive value returns `None`,
+/// matching upstream gufo behavior.
+pub(crate) fn parse_resolution(blob: &[u8]) -> Option<PixelDensity> {
+    let tiff = strip_exif_prefix(blob);
+    if tiff.len() < 8 {
+        return None;
+    }
+    let big_endian = match &tiff[0..4] {
+        b"MM\0*" => true,
+        b"II*\0" => false,
+        _ => return None,
+    };
+    let ifd_offset = read_u32(&tiff[4..8], big_endian) as usize;
+    let ifd = tiff.get(ifd_offset..)?;
+    if ifd.len() < 2 {
+        return None;
+    }
+    let num_entries = read_u16(&ifd[..2], big_endian) as usize;
+    let entries_start = ifd_offset.checked_add(2)?;
+    let entries_end = entries_start.checked_add(num_entries.checked_mul(IFD_ENTRY_BYTES)?)?;
+    let entries = tiff.get(entries_start..entries_end)?;
+
+    let mut x: Option<f64> = None;
+    let mut y: Option<f64> = None;
+    let mut unit: Option<PhysicalDimensionUnit> = None;
+    for i in 0..num_entries {
+        let off = i * IFD_ENTRY_BYTES;
+        let entry = &entries[off..off + IFD_ENTRY_BYTES];
+        match read_u16(&entry[0..2], big_endian) {
+            X_RESOLUTION_TAG => x = read_rational(tiff, entry, big_endian),
+            Y_RESOLUTION_TAG => y = read_rational(tiff, entry, big_endian),
+            RESOLUTION_UNIT_TAG => {
+                unit = match read_u16(&entry[8..10], big_endian) {
+                    2 => Some(PhysicalDimensionUnit::Inch),
+                    3 => Some(PhysicalDimensionUnit::Centimeter),
+                    _ => None,
+                };
+            }
+            _ => {}
+        }
+    }
+    let (x, y, unit) = (x?, y?, unit?);
+    if x <= 0.0 || y <= 0.0 || !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    Some(PixelDensity::new(x, unit, y, unit))
+}
+
+/// Read a type-5 RATIONAL (count 1) entry value as `f64`.
+fn read_rational(tiff: &[u8], entry: &[u8], big_endian: bool) -> Option<f64> {
+    if read_u16(&entry[2..4], big_endian) != 5 {
+        return None;
+    }
+    if read_u32(&entry[4..8], big_endian) != 1 {
+        return None;
+    }
+    let offset = read_u32(&entry[8..12], big_endian) as usize;
+    let bytes = tiff.get(offset..offset.checked_add(8)?)?;
+    let num = read_u32(&bytes[..4], big_endian) as f64;
+    let den = read_u32(&bytes[4..8], big_endian) as f64;
+    if den == 0.0 {
+        return None;
+    }
+    Some(num / den)
 }
 
 fn strip_exif_prefix(blob: &[u8]) -> &[u8] {
@@ -154,5 +230,99 @@ mod tests {
         blob.extend_from_slice(&8_u32.to_le_bytes());
         // No IFD bytes at offset 8.
         assert_eq!(parse_orientation(&blob), None);
+    }
+
+    fn build_tiff_with_resolution(
+        big_endian: bool,
+        x_num: u32,
+        x_den: u32,
+        y_num: u32,
+        y_den: u32,
+        unit: u16,
+    ) -> Vec<u8> {
+        let mut blob = Vec::new();
+        if big_endian {
+            blob.extend_from_slice(b"MM\0*");
+            blob.extend_from_slice(&8_u32.to_be_bytes());
+        } else {
+            blob.extend_from_slice(b"II*\0");
+            blob.extend_from_slice(&8_u32.to_le_bytes());
+        }
+        // IFD with 3 entries; rational data appended after entries.
+        // Header (8) + count (2) + 3*12 entries = 46; data at 46.
+        let x_off: u32 = 46;
+        let y_off: u32 = 54;
+        let count: u16 = 3;
+        if big_endian {
+            blob.extend_from_slice(&count.to_be_bytes());
+            blob.extend_from_slice(&X_RESOLUTION_TAG.to_be_bytes());
+            blob.extend_from_slice(&5_u16.to_be_bytes());
+            blob.extend_from_slice(&1_u32.to_be_bytes());
+            blob.extend_from_slice(&x_off.to_be_bytes());
+            blob.extend_from_slice(&Y_RESOLUTION_TAG.to_be_bytes());
+            blob.extend_from_slice(&5_u16.to_be_bytes());
+            blob.extend_from_slice(&1_u32.to_be_bytes());
+            blob.extend_from_slice(&y_off.to_be_bytes());
+            blob.extend_from_slice(&RESOLUTION_UNIT_TAG.to_be_bytes());
+            blob.extend_from_slice(&3_u16.to_be_bytes());
+            blob.extend_from_slice(&1_u32.to_be_bytes());
+            blob.extend_from_slice(&unit.to_be_bytes());
+            blob.extend_from_slice(&0_u16.to_be_bytes());
+            blob.extend_from_slice(&x_num.to_be_bytes());
+            blob.extend_from_slice(&x_den.to_be_bytes());
+            blob.extend_from_slice(&y_num.to_be_bytes());
+            blob.extend_from_slice(&y_den.to_be_bytes());
+        } else {
+            blob.extend_from_slice(&count.to_le_bytes());
+            blob.extend_from_slice(&X_RESOLUTION_TAG.to_le_bytes());
+            blob.extend_from_slice(&5_u16.to_le_bytes());
+            blob.extend_from_slice(&1_u32.to_le_bytes());
+            blob.extend_from_slice(&x_off.to_le_bytes());
+            blob.extend_from_slice(&Y_RESOLUTION_TAG.to_le_bytes());
+            blob.extend_from_slice(&5_u16.to_le_bytes());
+            blob.extend_from_slice(&1_u32.to_le_bytes());
+            blob.extend_from_slice(&y_off.to_le_bytes());
+            blob.extend_from_slice(&RESOLUTION_UNIT_TAG.to_le_bytes());
+            blob.extend_from_slice(&3_u16.to_le_bytes());
+            blob.extend_from_slice(&1_u32.to_le_bytes());
+            blob.extend_from_slice(&unit.to_le_bytes());
+            blob.extend_from_slice(&0_u16.to_le_bytes());
+            blob.extend_from_slice(&x_num.to_le_bytes());
+            blob.extend_from_slice(&x_den.to_le_bytes());
+            blob.extend_from_slice(&y_num.to_le_bytes());
+            blob.extend_from_slice(&y_den.to_le_bytes());
+        }
+        blob
+    }
+
+    #[test]
+    fn reads_resolution_little_endian() {
+        let blob = build_tiff_with_resolution(false, 300, 1, 300, 1, 2);
+        let d = parse_resolution(&blob).expect("density");
+        assert_eq!(d.x_value, 300.0);
+        assert_eq!(d.y_value, 300.0);
+        assert_eq!(d.x_unit, PhysicalDimensionUnit::Inch);
+        assert_eq!(d.y_unit, PhysicalDimensionUnit::Inch);
+    }
+
+    #[test]
+    fn reads_resolution_big_endian_centimeter() {
+        let blob = build_tiff_with_resolution(true, 118, 1, 119, 1, 3);
+        let d = parse_resolution(&blob).expect("density");
+        assert_eq!(d.x_value, 118.0);
+        assert_eq!(d.y_value, 119.0);
+        assert_eq!(d.x_unit, PhysicalDimensionUnit::Centimeter);
+    }
+
+    #[test]
+    fn rejects_unknown_resolution_unit() {
+        let blob = build_tiff_with_resolution(false, 300, 1, 300, 1, 1);
+        assert_eq!(parse_resolution(&blob), None);
+    }
+
+    #[test]
+    fn rejects_zero_denominator() {
+        let blob = build_tiff_with_resolution(false, 300, 0, 300, 1, 2);
+        assert_eq!(parse_resolution(&blob), None);
     }
 }

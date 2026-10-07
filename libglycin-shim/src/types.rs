@@ -61,6 +61,7 @@ pub(crate) struct LoaderState {
     pub(crate) inner: Mutex<Option<*mut GlycinNgLoader>>,
     pub(crate) apply_transformations: Mutex<bool>,
     pub(crate) accepted_memory_formats: Mutex<u32>,
+    pub(crate) color_convert_icc_srgb: Mutex<bool>,
     pub(crate) limits: Mutex<LoaderLimits>,
     /// Original source bytes, retained so resolution-independent
     /// formats (SVG) can be re-decoded at a different size when the
@@ -81,6 +82,7 @@ impl LoaderState {
             inner: Mutex::new(Some(loader)),
             apply_transformations: Mutex::new(true),
             accepted_memory_formats: Mutex::new(0),
+            color_convert_icc_srgb: Mutex::new(true),
             limits: Mutex::new(LoaderLimits::default()),
             source_bytes,
         }
@@ -173,6 +175,13 @@ pub(crate) struct FrameState {
     /// CICP code points carried over from the originating image, if
     /// any. Used by `gly_frame_get_color_cicp`.
     pub(crate) cicp: Option<[u8; 4]>,
+    /// ICC profile bytes carried over from the originating image, if
+    /// any. Used by `gly_frame_get_color_icc_profile` and
+    /// `gly_frame_get_color_mode`.
+    pub(crate) icc_profile: Option<Vec<u8>>,
+    /// Pixel density carried over from the originating image, if any.
+    /// Used by `gly_frame_get_details`.
+    pub(crate) pixel_density: Option<crate::density::PixelDensity>,
 }
 
 /// State backing a `GlyFrameRequest`.
