@@ -81,6 +81,21 @@ enum_table!(LOADER_ERROR_VALUES;
     2 => "NoMoreFrames" / "no-more-frames",
 );
 
+enum_table!(PHYSICAL_DIMENSION_UNIT_VALUES;
+    1 => "Inch" / "inch",
+    2 => "Pica" / "pica",
+    3 => "Point" / "point",
+    4 => "Meter" / "meter",
+    5 => "Centimeter" / "centimeter",
+    6 => "Millimeter" / "millimeter",
+);
+
+enum_table!(COLOR_MODE_VALUES;
+    1 => "Srgb" / "srgb",
+    2 => "Cicp" / "cicp",
+    3 => "IccProfile" / "icc-profile",
+);
+
 flags_table!(MEMORY_FORMAT_SELECTION_VALUES;
     1 << 0 => "B8g8r8a8Premultiplied" / "b8g8r8a8-premultiplied",
     1 << 1 => "A8r8g8b8Premultiplied" / "a8r8g8b8-premultiplied",
@@ -170,6 +185,14 @@ get_type_fn!(
     register_enum(c"GlyLoaderError", LOADER_ERROR_VALUES)
 );
 get_type_fn!(
+    gly_physical_dimension_unit_get_type,
+    register_enum(c"GlyPhysicalDimensionUnit", PHYSICAL_DIMENSION_UNIT_VALUES)
+);
+get_type_fn!(
+    gly_color_mode_get_type,
+    register_enum(c"GlyColorMode", COLOR_MODE_VALUES)
+);
+get_type_fn!(
     gly_memory_format_selection_get_type,
     register_flags(c"GlyMemoryFormatSelection", MEMORY_FORMAT_SELECTION_VALUES)
 );
@@ -186,6 +209,14 @@ get_type_fn!(
     register_gobject(c"GlyEncodedImage")
 );
 get_type_fn!(gly_new_frame_get_type, register_gobject(c"GlyNewFrame"));
+get_type_fn!(
+    gly_pixel_density_get_type,
+    register_gobject(c"GlyPixelDensity")
+);
+get_type_fn!(
+    gly_frame_details_get_type,
+    register_gobject(c"GlyFrameDetails")
+);
 
 /// # Safety
 /// Always safe. Registers the boxed type on first call and caches it.
@@ -222,10 +253,40 @@ mod tests {
     }
 
     #[test]
+    fn enum_values_are_sequential_from_one() {
+        // glycin 2.2 enums start at 1, matching `glycin.h`.
+        for table in [PHYSICAL_DIMENSION_UNIT_VALUES, COLOR_MODE_VALUES] {
+            for (i, entry) in enum_payload(table).iter().enumerate() {
+                assert_eq!(entry.value, i as i32 + 1);
+                assert!(!entry.value_name.is_null());
+                assert!(!entry.value_nick.is_null());
+            }
+        }
+    }
+
+    #[test]
     fn enum_tables_have_expected_lengths() {
         assert_eq!(MEMORY_FORMAT_VALUES.len(), 23 + 1);
         assert_eq!(SANDBOX_SELECTOR_VALUES.len(), 4 + 1);
         assert_eq!(LOADER_ERROR_VALUES.len(), 3 + 1);
+        assert_eq!(PHYSICAL_DIMENSION_UNIT_VALUES.len(), 6 + 1);
+        assert_eq!(COLOR_MODE_VALUES.len(), 3 + 1);
+    }
+
+    #[test]
+    fn glycin_2_2_enum_values_match_the_rust_side() {
+        use crate::colormode::{GLY_COLOR_MODE_CICP, GLY_COLOR_MODE_SRGB};
+        use crate::density::{GLY_PHYSICAL_DIMENSION_UNIT_INCH, Unit};
+
+        assert_eq!(COLOR_MODE_VALUES[0].value, GLY_COLOR_MODE_SRGB);
+        assert_eq!(COLOR_MODE_VALUES[1].value, GLY_COLOR_MODE_CICP);
+        assert_eq!(
+            PHYSICAL_DIMENSION_UNIT_VALUES[0].value,
+            GLY_PHYSICAL_DIMENSION_UNIT_INCH
+        );
+        for entry in enum_payload(PHYSICAL_DIMENSION_UNIT_VALUES) {
+            assert!(Unit::from_raw(entry.value).is_some());
+        }
     }
 
     #[test]
@@ -267,6 +328,12 @@ mod tests {
         assert_eq!(
             name(MEMORY_FORMAT_SELECTION_VALUES[12].value_name),
             "R16g16b16Float"
+        );
+        assert_eq!(name(COLOR_MODE_VALUES[2].value_name), "IccProfile");
+        assert_eq!(name(COLOR_MODE_VALUES[2].value_nick), "icc-profile");
+        assert_eq!(
+            name(PHYSICAL_DIMENSION_UNIT_VALUES[5].value_name),
+            "Millimeter"
         );
     }
 
