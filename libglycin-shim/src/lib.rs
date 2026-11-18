@@ -276,14 +276,22 @@ pub unsafe extern "C" fn gly_loader_load(
         unsafe { set_error(error, 0, "null loader") };
         return ptr::null_mut();
     };
-
-    let inner_ptr = match state.inner.lock().unwrap().take() {
-        Some(p) => p,
-        None => {
-            unsafe { set_error(error, 0, "loader already consumed") };
-            return ptr::null_mut();
+    match load_image(state) {
+        Ok(image) => unsafe { attach_state(image) },
+        Err(msg) => {
+            unsafe { set_error(error, 0, &msg) };
+            ptr::null_mut()
         }
-    };
+    }
+}
+
+fn load_image(state: &LoaderState) -> Result<ImageState, String> {
+    let inner_ptr = state
+        .inner
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or("loader already consumed")?;
 
     let apply = *state.apply_transformations.lock().unwrap();
     let limits = *state.limits.lock().unwrap();
@@ -296,8 +304,7 @@ pub unsafe extern "C" fn gly_loader_load(
 
     let image_ptr = unsafe { ngapi::glycin_ng_loader_load(inner_ptr) };
     if image_ptr.is_null() {
-        unsafe { set_error_from_ng(error, "gly_loader_load") };
-        return ptr::null_mut();
+        return Err(format!("gly_loader_load: {}", ngapi::last_error_message()));
     }
 
     let frame_count = unsafe { ngapi::glycin_ng_image_frame_count(image_ptr) };
@@ -315,14 +322,19 @@ pub unsafe extern "C" fn gly_loader_load(
                 source_bytes: bytes.clone(),
                 limits,
                 apply_transformations: apply,
-                accepted_memory_formats: accepted,
             })
         } else {
             None
         }
     });
     let mime = mime::from_format_name(&format_name).and_then(|m| CString::new(m).ok());
-    unsafe { attach_state(ImageState::new(image_ptr, frame_count, rerender, mime)) }
+    Ok(ImageState::new(
+        image_ptr,
+        frame_count,
+        rerender,
+        accepted,
+        mime,
+    ))
 }
 
 fn is_rescalable_format(name: &str) -> bool {
@@ -434,20 +446,24 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
         return ptr::null_mut();
     };
     let request_state = unsafe { state_ref::<FrameRequestState>(frame_request) };
+    match specific_frame(img_state, request_state) {
+        Ok(frame) => unsafe { attach_state(frame) },
+        Err((code, msg)) => {
+            unsafe { set_error(error, code, msg) };
+            ptr::null_mut()
+        }
+    }
+}
+
+fn specific_frame(
+    img_state: &ImageState,
+    request_state: Option<&FrameRequestState>,
+) -> Result<FrameState, (c_int, &'static str)> {
     let loop_animation = request_state
         .map(|s| *s.loop_animation.lock().unwrap())
         .unwrap_or(true);
     let scale = request_state.and_then(|s| *s.scale.lock().unwrap());
-    // The accepted-formats bitmask lives on the Loader; we only
-    // have the Image here. Re-derive from the rerender snapshot for
-    // vector formats, otherwise leave at 0 (passthrough). gdk-pixbuf
-    // does not currently rely on conversion for raster frames in
-    // this code path.
-    let accepted = img_state
-        .rerender
-        .as_ref()
-        .map(|r| r.accepted_memory_formats)
-        .unwrap_or(0);
+    let accepted = img_state.accepted_memory_formats;
 
     // SVG re-render: when the caller asks for a different size, redo
     // the decode at that size so the output is crisp instead of
@@ -476,20 +492,16 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
             rerender.limits.apply(new_loader);
             let new_image = unsafe { ngapi::glycin_ng_loader_load(new_loader) };
             if !new_image.is_null()
-                && let Some(raw) = extract_frame(new_image, 0, rerender.accepted_memory_formats)
+                && let Some(raw) = extract_frame(new_image, 0, accepted)
             {
-                let cicp = fetch_cicp(new_image);
-                let icc_profile = fetch_icc(new_image);
-                let pixel_density = fetch_density(new_image);
-                unsafe { ngapi::glycin_ng_image_free(new_image) };
-                return unsafe {
-                    attach_state(FrameState {
-                        frame: raw,
-                        cicp,
-                        icc_profile,
-                        pixel_density,
-                    })
+                let frame = FrameState {
+                    frame: raw,
+                    cicp: fetch_cicp(new_image),
+                    icc_profile: fetch_icc(new_image),
+                    pixel_density: fetch_density(new_image),
                 };
+                unsafe { ngapi::glycin_ng_image_free(new_image) };
+                return Ok(frame);
             }
             if !new_image.is_null() {
                 unsafe { ngapi::glycin_ng_image_free(new_image) };
@@ -499,28 +511,34 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
         }
     }
 
-    let idx = match img_state.advance(loop_animation) {
-        Some(i) => i,
-        None => {
-            unsafe { set_error(error, 2, "no more frames") };
-            return ptr::null_mut();
-        }
-    };
-    let Some(raw) = extract_frame(img_state.inner, idx, accepted) else {
-        unsafe { set_error(error, 0, "frame extraction failed") };
-        return ptr::null_mut();
-    };
-    let cicp = fetch_cicp(img_state.inner);
-    let icc_profile = fetch_icc(img_state.inner);
-    let pixel_density = fetch_density(img_state.inner);
-    unsafe {
-        attach_state(FrameState {
-            frame: raw,
-            cicp,
-            icc_profile,
-            pixel_density,
-        })
-    }
+    let idx = img_state
+        .advance(loop_animation)
+        .ok_or((2, "no more frames"))?;
+    let raw =
+        extract_frame(img_state.inner, idx, accepted).ok_or((0, "frame extraction failed"))?;
+    let icc_profile = fetch_icc(img_state.inner).filter(|icc| icc_matches(icc, raw.format));
+    Ok(FrameState {
+        frame: raw,
+        cicp: fetch_cicp(img_state.inner),
+        icc_profile,
+        pixel_density: fetch_density(img_state.inner),
+    })
+}
+
+/// A grayscale ICC profile cannot describe a gray frame that
+/// conversion expanded to color.
+fn icc_matches(icc: &[u8], format: c_uint) -> bool {
+    let gray_profile = icc.get(16..20) == Some(b"GRAY");
+    let gray_frame = matches!(
+        format,
+        ngapi::GLYCIN_NG_FORMAT_G8
+            | ngapi::GLYCIN_NG_FORMAT_G8A8
+            | ngapi::GLYCIN_NG_FORMAT_G8A8_PRE
+            | ngapi::GLYCIN_NG_FORMAT_G16
+            | ngapi::GLYCIN_NG_FORMAT_G16A16
+            | ngapi::GLYCIN_NG_FORMAT_G16A16_PRE
+    );
+    !gray_profile || gray_frame
 }
 
 /// Read the image's CICP code points from the engine, if present.
@@ -1036,6 +1054,39 @@ pub unsafe extern "C" fn gly_encoded_image_get_data(encoded: *mut GObject) -> *m
         return ptr::null_mut();
     }
     unsafe { ffi::g_bytes_new(data_ptr as *const c_void, data_len) }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::*;
+    use crate::convert::Selection;
+
+    #[test]
+    fn raster_frame_honours_loader_accepted_formats() {
+        let png = include_bytes!("../../tests/data/gray-alpha.png");
+        let inner = unsafe { ngapi::glycin_ng_loader_new_bytes(png.as_ptr(), png.len()) };
+        let loader = LoaderState::new(inner, None);
+        *loader.accepted_memory_formats.lock().unwrap() =
+            Selection::R8G8B8A8.bits() | Selection::R8G8B8.bits();
+        let image = load_image(&loader).unwrap();
+
+        let frame = specific_frame(&image, None).unwrap().frame;
+        assert_eq!(frame.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
+        assert_eq!(frame.stride, 8);
+        assert_eq!(frame.data, [40, 40, 40, 200, 90, 90, 90, 0]);
+    }
+
+    #[test]
+    fn gray_icc_is_dropped_once_frame_is_color() {
+        let mut gray = vec![0u8; 128];
+        gray[16..20].copy_from_slice(b"GRAY");
+        assert!(icc_matches(&gray, ngapi::GLYCIN_NG_FORMAT_G8A8));
+        assert!(!icc_matches(&gray, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8));
+
+        let mut rgb = vec![0u8; 128];
+        rgb[16..20].copy_from_slice(b"RGB ");
+        assert!(icc_matches(&rgb, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8));
+    }
 }
 
 #[cfg(test)]
