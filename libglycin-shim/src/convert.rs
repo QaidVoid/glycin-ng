@@ -269,4 +269,24 @@ mod tests {
         assert_eq!(out.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
         assert_eq!(out.data, &[10, 20, 30, 255]);
     }
+
+    // gdk-pixbuf only accepts R8G8B8A8/R8G8B8 and sizes the pixbuf
+    // from the channel count, so a gray frame reaching it unconverted
+    // is a crash, not a cosmetic issue.
+    #[test]
+    fn gray_alpha_to_rgba_expands_channels() {
+        let f = frame(ngapi::GLYCIN_NG_FORMAT_G8A8, vec![40, 200], 1, 1);
+        let out = maybe_convert(f, Selection::R8G8B8A8.bits() | Selection::R8G8B8.bits());
+        assert_eq!(out.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
+        assert_eq!(out.stride, 4);
+        assert_eq!(out.data, &[40, 40, 40, 200]);
+    }
+
+    #[test]
+    fn gray_to_rgba_expands_channels() {
+        let f = frame(ngapi::GLYCIN_NG_FORMAT_G8, vec![40], 1, 1);
+        let out = maybe_convert(f, Selection::R8G8B8A8.bits() | Selection::R8G8B8.bits());
+        assert_eq!(out.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
+        assert_eq!(out.data, &[40, 40, 40, 255]);
+    }
 }

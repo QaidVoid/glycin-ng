@@ -322,7 +322,15 @@ pub unsafe extern "C" fn gly_loader_load(
         }
     });
     let mime = mime::from_format_name(&format_name).and_then(|m| CString::new(m).ok());
-    unsafe { attach_state(ImageState::new(image_ptr, frame_count, rerender, mime)) }
+    unsafe {
+        attach_state(ImageState::new(
+            image_ptr,
+            frame_count,
+            rerender,
+            accepted,
+            mime,
+        ))
+    }
 }
 
 fn is_rescalable_format(name: &str) -> bool {
@@ -438,16 +446,7 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
         .map(|s| *s.loop_animation.lock().unwrap())
         .unwrap_or(true);
     let scale = request_state.and_then(|s| *s.scale.lock().unwrap());
-    // The accepted-formats bitmask lives on the Loader; we only
-    // have the Image here. Re-derive from the rerender snapshot for
-    // vector formats, otherwise leave at 0 (passthrough). gdk-pixbuf
-    // does not currently rely on conversion for raster frames in
-    // this code path.
-    let accepted = img_state
-        .rerender
-        .as_ref()
-        .map(|r| r.accepted_memory_formats)
-        .unwrap_or(0);
+    let accepted = img_state.accepted_memory_formats;
 
     // SVG re-render: when the caller asks for a different size, redo
     // the decode at that size so the output is crisp instead of

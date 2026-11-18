@@ -106,6 +106,11 @@ pub(crate) struct ImageState {
     pub(crate) cursor: Mutex<usize>,
     pub(crate) frame_count: usize,
     pub(crate) rerender: Option<Rerender>,
+    /// The loader's `gly_loader_set_accepted_memory_formats` mask,
+    /// carried over so raster frames get converted on extraction as
+    /// well. Not stored on the [`Rerender`] snapshot alone, because
+    /// that one only exists for resolution-independent formats.
+    pub(crate) accepted_memory_formats: u32,
     /// Detected MIME type, cached so `gly_image_get_mime_type` can
     /// hand back a stable `const char*` owned by the image. `None`
     /// when the format has no MIME mapping.
@@ -120,6 +125,7 @@ impl ImageState {
         image: *mut GlycinNgImage,
         frame_count: usize,
         rerender: Option<Rerender>,
+        accepted_memory_formats: u32,
         mime: Option<CString>,
     ) -> Self {
         Self {
@@ -127,6 +133,7 @@ impl ImageState {
             cursor: Mutex::new(0),
             frame_count,
             rerender,
+            accepted_memory_formats,
             mime,
         }
     }
