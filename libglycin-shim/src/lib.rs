@@ -315,7 +315,6 @@ pub unsafe extern "C" fn gly_loader_load(
                 source_bytes: bytes.clone(),
                 limits,
                 apply_transformations: apply,
-                accepted_memory_formats: accepted,
             })
         } else {
             None
@@ -442,6 +441,19 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
         return ptr::null_mut();
     };
     let request_state = unsafe { state_ref::<FrameRequestState>(frame_request) };
+    match specific_frame(img_state, request_state) {
+        Ok(frame) => unsafe { attach_state(frame) },
+        Err((code, msg)) => {
+            unsafe { set_error(error, code, msg) };
+            ptr::null_mut()
+        }
+    }
+}
+
+fn specific_frame(
+    img_state: &ImageState,
+    request_state: Option<&FrameRequestState>,
+) -> Result<FrameState, (c_int, &'static str)> {
     let loop_animation = request_state
         .map(|s| *s.loop_animation.lock().unwrap())
         .unwrap_or(true);
@@ -475,20 +487,16 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
             rerender.limits.apply(new_loader);
             let new_image = unsafe { ngapi::glycin_ng_loader_load(new_loader) };
             if !new_image.is_null()
-                && let Some(raw) = extract_frame(new_image, 0, rerender.accepted_memory_formats)
+                && let Some(raw) = extract_frame(new_image, 0, accepted)
             {
-                let cicp = fetch_cicp(new_image);
-                let icc_profile = fetch_icc(new_image);
-                let pixel_density = fetch_density(new_image);
-                unsafe { ngapi::glycin_ng_image_free(new_image) };
-                return unsafe {
-                    attach_state(FrameState {
-                        frame: raw,
-                        cicp,
-                        icc_profile,
-                        pixel_density,
-                    })
+                let frame = FrameState {
+                    frame: raw,
+                    cicp: fetch_cicp(new_image),
+                    icc_profile: fetch_icc(new_image),
+                    pixel_density: fetch_density(new_image),
                 };
+                unsafe { ngapi::glycin_ng_image_free(new_image) };
+                return Ok(frame);
             }
             if !new_image.is_null() {
                 unsafe { ngapi::glycin_ng_image_free(new_image) };
@@ -498,28 +506,17 @@ pub unsafe extern "C" fn gly_image_get_specific_frame(
         }
     }
 
-    let idx = match img_state.advance(loop_animation) {
-        Some(i) => i,
-        None => {
-            unsafe { set_error(error, 2, "no more frames") };
-            return ptr::null_mut();
-        }
-    };
-    let Some(raw) = extract_frame(img_state.inner, idx, accepted) else {
-        unsafe { set_error(error, 0, "frame extraction failed") };
-        return ptr::null_mut();
-    };
-    let cicp = fetch_cicp(img_state.inner);
-    let icc_profile = fetch_icc(img_state.inner);
-    let pixel_density = fetch_density(img_state.inner);
-    unsafe {
-        attach_state(FrameState {
-            frame: raw,
-            cicp,
-            icc_profile,
-            pixel_density,
-        })
-    }
+    let idx = img_state
+        .advance(loop_animation)
+        .ok_or((2, "no more frames"))?;
+    let raw =
+        extract_frame(img_state.inner, idx, accepted).ok_or((0, "frame extraction failed"))?;
+    Ok(FrameState {
+        frame: raw,
+        cicp: fetch_cicp(img_state.inner),
+        icc_profile: fetch_icc(img_state.inner),
+        pixel_density: fetch_density(img_state.inner),
+    })
 }
 
 /// Read the image's CICP code points from the engine, if present.
@@ -1035,6 +1032,29 @@ pub unsafe extern "C" fn gly_encoded_image_get_data(encoded: *mut GObject) -> *m
         return ptr::null_mut();
     }
     unsafe { ffi::g_bytes_new(data_ptr as *const c_void, data_len) }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::*;
+    use crate::convert::Selection;
+
+    #[test]
+    fn raster_frame_honours_accepted_formats() {
+        let png = include_bytes!("../../tests/data/gray-alpha.png");
+        let loader = unsafe { ngapi::glycin_ng_loader_new_bytes(png.as_ptr(), png.len()) };
+        assert!(!loader.is_null());
+        let image = unsafe { ngapi::glycin_ng_loader_load(loader) };
+        assert!(!image.is_null());
+        let frame_count = unsafe { ngapi::glycin_ng_image_frame_count(image) };
+        let accepted = Selection::R8G8B8A8.bits() | Selection::R8G8B8.bits();
+        let state = ImageState::new(image, frame_count, None, accepted, None);
+
+        let frame = specific_frame(&state, None).unwrap().frame;
+        assert_eq!(frame.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
+        assert_eq!(frame.stride, 8);
+        assert_eq!(frame.data, [40, 40, 40, 200, 90, 90, 90, 0]);
+    }
 }
 
 #[cfg(test)]

@@ -107,9 +107,7 @@ pub(crate) struct ImageState {
     pub(crate) frame_count: usize,
     pub(crate) rerender: Option<Rerender>,
     /// The loader's `gly_loader_set_accepted_memory_formats` mask,
-    /// carried over so raster frames get converted on extraction as
-    /// well. Not stored on the [`Rerender`] snapshot alone, because
-    /// that one only exists for resolution-independent formats.
+    /// applied to every frame extracted from this image.
     pub(crate) accepted_memory_formats: u32,
     /// Detected MIME type, cached so `gly_image_get_mime_type` can
     /// hand back a stable `const char*` owned by the image. `None`
@@ -172,7 +170,6 @@ pub(crate) struct Rerender {
     pub(crate) source_bytes: Arc<[u8]>,
     pub(crate) limits: LoaderLimits,
     pub(crate) apply_transformations: bool,
-    pub(crate) accepted_memory_formats: u32,
 }
 
 /// State backing a `GlyFrame`. Owns its pixel data so the frame
