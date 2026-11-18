@@ -99,7 +99,6 @@ fn pick_target(src: c_uint, selection: Selection) -> Option<c_uint> {
         ngapi::GLYCIN_NG_FORMAT_B8G8R8A8_PRE => Some(ngapi::GLYCIN_NG_FORMAT_B8G8R8A8),
         ngapi::GLYCIN_NG_FORMAT_A8R8G8B8_PRE => Some(ngapi::GLYCIN_NG_FORMAT_A8R8G8B8),
         ngapi::GLYCIN_NG_FORMAT_G8A8_PRE => Some(ngapi::GLYCIN_NG_FORMAT_G8A8),
-        ngapi::GLYCIN_NG_FORMAT_G16A16_PRE => Some(ngapi::GLYCIN_NG_FORMAT_G16A16),
         _ => None,
     };
     let priority: &[c_uint] = &[
@@ -152,15 +151,52 @@ fn convert_layout(src: &RawFrame, target: c_uint) -> Option<RawFrame> {
     })
 }
 
-/// Reads one pixel as straight 8-bit RGBA. 16-bit samples are native
-/// endian and reduced to their high byte.
+/// Reads one pixel as straight 8-bit RGBA. Samples are native endian.
+/// 16-bit samples are reduced to their high byte, after unpremultiplying
+/// at full precision. Float samples are clamped to `0.0..=1.0` and
+/// scaled.
 fn sample_rgba8(fmt: c_uint, p: &[u8]) -> Option<(u8, u8, u8, u8)> {
-    let hi = |i: usize| (u16::from_ne_bytes([p[2 * i], p[2 * i + 1]]) >> 8) as u8;
+    let u16_at = |i: usize| u16::from_ne_bytes([p[2 * i], p[2 * i + 1]]);
+    let hi = |i: usize| (u16_at(i) >> 8) as u8;
+    let f32_at =
+        |i: usize| f32::from_ne_bytes([p[4 * i], p[4 * i + 1], p[4 * i + 2], p[4 * i + 3]]);
     Some(match fmt {
         ngapi::GLYCIN_NG_FORMAT_G16 => (hi(0), hi(0), hi(0), 255),
         ngapi::GLYCIN_NG_FORMAT_G16A16 => (hi(0), hi(0), hi(0), hi(1)),
+        ngapi::GLYCIN_NG_FORMAT_G16A16_PRE => {
+            let g = unpremul16(u16_at(0), u16_at(1));
+            (g, g, g, hi(1))
+        }
         ngapi::GLYCIN_NG_FORMAT_R16G16B16 => (hi(0), hi(1), hi(2), 255),
         ngapi::GLYCIN_NG_FORMAT_R16G16B16A16 => (hi(0), hi(1), hi(2), hi(3)),
+        ngapi::GLYCIN_NG_FORMAT_R16G16B16A16_PRE => {
+            let a = u16_at(3);
+            (
+                unpremul16(u16_at(0), a),
+                unpremul16(u16_at(1), a),
+                unpremul16(u16_at(2), a),
+                hi(3),
+            )
+        }
+        ngapi::GLYCIN_NG_FORMAT_R32G32B32_F => {
+            (unorm8(f32_at(0)), unorm8(f32_at(1)), unorm8(f32_at(2)), 255)
+        }
+        ngapi::GLYCIN_NG_FORMAT_R32G32B32A32_F => (
+            unorm8(f32_at(0)),
+            unorm8(f32_at(1)),
+            unorm8(f32_at(2)),
+            unorm8(f32_at(3)),
+        ),
+        ngapi::GLYCIN_NG_FORMAT_R32G32B32A32_F_PRE => {
+            let a = f32_at(3);
+            let unpremul = |c: f32| if a > 0.0 { unorm8(c / a) } else { 0 };
+            (
+                unpremul(f32_at(0)),
+                unpremul(f32_at(1)),
+                unpremul(f32_at(2)),
+                unorm8(a),
+            )
+        }
         ngapi::GLYCIN_NG_FORMAT_G8 => (p[0], p[0], p[0], 255),
         ngapi::GLYCIN_NG_FORMAT_G8A8 => (p[0], p[0], p[0], p[1]),
         ngapi::GLYCIN_NG_FORMAT_G8A8_PRE => {
@@ -200,6 +236,17 @@ fn emit_pixel(target: c_uint, r: u8, g: u8, b: u8, a: u8, out: &mut Vec<u8>) {
 fn luma(r: u8, g: u8, b: u8) -> u8 {
     let v = 30 * r as u32 + 59 * g as u32 + 11 * b as u32;
     (v / 100) as u8
+}
+
+fn unorm8(v: f32) -> u8 {
+    (v.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn unpremul16(c: u16, a: u16) -> u8 {
+    if a == 0 {
+        return 0;
+    }
+    ((c as u32 * 65535 / a as u32).min(65535) >> 8) as u8
 }
 
 fn unpremul_g8(g: u8, a: u8) -> (u8, u8) {
@@ -312,5 +359,93 @@ mod tests {
         let out = maybe_convert(f, Selection::R8G8B8A8.bits() | Selection::R8G8B8.bits());
         assert_eq!(out.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
         assert_eq!(out.data, &[0x12, 0x12, 0x12, 0xab]);
+    }
+
+    const RGBA8: u32 = Selection::R8G8B8A8.bits() | Selection::R8G8B8.bits();
+
+    fn f32_bytes(v: &[f32]) -> Vec<u8> {
+        v.iter().flat_map(|f| f.to_ne_bytes()).collect()
+    }
+
+    fn u16_bytes(v: &[u16]) -> Vec<u8> {
+        v.iter().flat_map(|x| x.to_ne_bytes()).collect()
+    }
+
+    #[test]
+    fn float_rgb_clamps_and_scales() {
+        let f = frame(
+            ngapi::GLYCIN_NG_FORMAT_R32G32B32_F,
+            f32_bytes(&[1.0, 0.5, -0.5]),
+            1,
+            1,
+        );
+        let out = maybe_convert(f, RGBA8);
+        assert_eq!(out.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
+        assert_eq!(out.data, &[255, 128, 0, 255]);
+    }
+
+    #[test]
+    fn float_rgba_keeps_alpha() {
+        let f = frame(
+            ngapi::GLYCIN_NG_FORMAT_R32G32B32A32_F,
+            f32_bytes(&[0.0, 1.5, 0.25, 0.25, 1.0, 1.0, 1.0, 0.0]),
+            2,
+            1,
+        );
+        let out = maybe_convert(f, RGBA8);
+        assert_eq!(out.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
+        assert_eq!(out.stride, 8);
+        assert_eq!(out.data, &[0, 255, 64, 64, 255, 255, 255, 0]);
+    }
+
+    #[test]
+    fn float_premultiplied_is_unpremultiplied() {
+        let f = frame(
+            ngapi::GLYCIN_NG_FORMAT_R32G32B32A32_F_PRE,
+            f32_bytes(&[0.25, 0.5, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0]),
+            2,
+            1,
+        );
+        let out = maybe_convert(f, RGBA8);
+        assert_eq!(out.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
+        assert_eq!(out.data, &[128, 255, 0, 128, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn rgba16_premultiplied_is_unpremultiplied() {
+        let f = frame(
+            ngapi::GLYCIN_NG_FORMAT_R16G16B16A16_PRE,
+            u16_bytes(&[0x4000, 0x8000, 0, 0x8000, 0, 0, 0, 0]),
+            2,
+            1,
+        );
+        let out = maybe_convert(f, RGBA8);
+        assert_eq!(out.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
+        assert_eq!(out.data, &[127, 255, 0, 128, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn gray16_premultiplied_is_unpremultiplied() {
+        let f = frame(
+            ngapi::GLYCIN_NG_FORMAT_G16A16_PRE,
+            u16_bytes(&[0x4000, 0x8000]),
+            1,
+            1,
+        );
+        let out = maybe_convert(f, RGBA8);
+        assert_eq!(out.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
+        assert_eq!(out.data, &[127, 127, 127, 128]);
+    }
+
+    #[test]
+    fn sixteen_bit_target_is_never_picked() {
+        let f = frame(
+            ngapi::GLYCIN_NG_FORMAT_G16A16_PRE,
+            u16_bytes(&[0x4000, 0x8000]),
+            1,
+            1,
+        );
+        let out = maybe_convert(f, Selection::G16A16.bits());
+        assert_eq!(out.format, ngapi::GLYCIN_NG_FORMAT_G16A16_PRE);
     }
 }

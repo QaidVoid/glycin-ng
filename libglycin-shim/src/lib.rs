@@ -525,8 +525,8 @@ fn specific_frame(
     })
 }
 
-/// A grayscale ICC profile cannot describe a gray frame that
-/// conversion expanded to color.
+/// Whether the profile's color space still matches the frame after
+/// conversion, which can turn gray into color or color into gray.
 fn icc_matches(icc: &[u8], format: c_uint) -> bool {
     let gray_profile = icc.get(16..20) == Some(b"GRAY");
     let gray_frame = matches!(
@@ -538,7 +538,7 @@ fn icc_matches(icc: &[u8], format: c_uint) -> bool {
             | ngapi::GLYCIN_NG_FORMAT_G16A16
             | ngapi::GLYCIN_NG_FORMAT_G16A16_PRE
     );
-    !gray_profile || gray_frame
+    gray_profile == gray_frame
 }
 
 /// Read the image's CICP code points from the engine, if present.
@@ -1077,7 +1077,7 @@ mod frame_tests {
     }
 
     #[test]
-    fn gray_icc_is_dropped_once_frame_is_color() {
+    fn icc_is_dropped_when_color_model_changes() {
         let mut gray = vec![0u8; 128];
         gray[16..20].copy_from_slice(b"GRAY");
         assert!(icc_matches(&gray, ngapi::GLYCIN_NG_FORMAT_G8A8));
@@ -1086,6 +1086,7 @@ mod frame_tests {
         let mut rgb = vec![0u8; 128];
         rgb[16..20].copy_from_slice(b"RGB ");
         assert!(icc_matches(&rgb, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8));
+        assert!(!icc_matches(&rgb, ngapi::GLYCIN_NG_FORMAT_G8A8));
     }
 }
 

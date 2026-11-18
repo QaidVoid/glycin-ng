@@ -33,13 +33,12 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
             });
         }
     };
-    let _ = channels;
 
     let pixel_count = (width as u64)
         .checked_mul(height as u64)
         .ok_or(Error::LimitExceeded("max_pixels"))? as usize;
     let total_floats = pixel_count
-        .checked_mul(4)
+        .checked_mul(channels)
         .ok_or(Error::LimitExceeded("buffer size"))?;
 
     let mut frames = Vec::with_capacity(num_keyframes as usize);
@@ -55,7 +54,7 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
         let mut stream = render.stream();
         let _written = stream.write_to_buffer(&mut buf);
 
-        let bytes_vec = floats_to_bytes(buf);
+        let bytes_vec = floats_to_bytes(gray_to_rgba(buf, channels));
         let stride = (format.bytes_per_pixel() as u64)
             .checked_mul(width as u64)
             .filter(|s| *s <= u32::MAX as u64)
@@ -108,6 +107,21 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     Ok(image)
 }
 
+/// jxl-oxide writes one sample per channel, so gray samples are
+/// widened to match the float RGBA texture format.
+fn gray_to_rgba(samples: Vec<f32>, channels: usize) -> Vec<f32> {
+    match channels {
+        1 => samples.iter().flat_map(|&g| [g, g, g, 1.0]).collect(),
+        2 => samples
+            .as_chunks()
+            .0
+            .iter()
+            .flat_map(|&[g, a]| [g, g, g, a])
+            .collect(),
+        _ => samples,
+    }
+}
+
 fn floats_to_bytes(v: Vec<f32>) -> Vec<u8> {
     let mut out = Vec::with_capacity(v.len() * 4);
     for sample in v {
@@ -133,5 +147,29 @@ mod tests {
             err,
             Error::Decoder { .. } | Error::Malformed(_) | Error::Io(_)
         ));
+    }
+
+    #[test]
+    fn gray_alpha_is_widened_to_rgba() {
+        let opts = DecodeOptions {
+            limits: Limits::default(),
+            apply_transformations: true,
+            render_size_hint: None,
+        };
+        let image = decode(include_bytes!("../../tests/data/gray-alpha.jxl"), &opts).unwrap();
+        let texture = image.frames()[0].texture();
+        assert_eq!(texture.format(), MemoryFormat::R32g32b32a32Float);
+        let px: Vec<f32> = texture
+            .data()
+            .as_chunks()
+            .0
+            .iter()
+            .map(|&b| f32::from_ne_bytes(b))
+            .collect();
+        let expected = [0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 0.5];
+        assert_eq!(px.len(), expected.len());
+        for (got, want) in px.iter().zip(expected) {
+            assert!((got - want).abs() < 0.01, "{px:?}");
+        }
     }
 }
