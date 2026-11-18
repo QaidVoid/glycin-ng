@@ -305,7 +305,7 @@ mod tests {
                 unit: png::Unit::Meter,
             }));
             let mut writer = enc.write_header().unwrap();
-            writer.write_image_data(&vec![0x80; 2 * 2 * 4]).unwrap();
+            writer.write_image_data(&[0x80; 2 * 2 * 4]).unwrap();
         }
         let image = decode(&out, &opts()).unwrap();
         let density = image.pixel_density().expect("density");

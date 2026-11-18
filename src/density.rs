@@ -82,6 +82,7 @@ impl PhysicalDimensionUnit {
     }
 
     /// Map a C ABI discriminant (1..=6) to a unit.
+    #[cfg_attr(not(feature = "c-api"), allow(dead_code))]
     pub(crate) fn from_discriminant(value: i32) -> Option<Self> {
         match value {
             1 => Some(Self::Inch),
