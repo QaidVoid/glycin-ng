@@ -70,9 +70,7 @@ pub(crate) fn maybe_convert(frame: RawFrame, selection_bits: u32) -> RawFrame {
     if selection_bits == 0 {
         return frame;
     }
-    let Some(selection) = Selection::from_bits(selection_bits) else {
-        return frame;
-    };
+    let selection = Selection::from_bits_truncate(selection_bits);
     if selection_accepts(selection, frame.format) {
         return frame;
     }
@@ -154,8 +152,15 @@ fn convert_layout(src: &RawFrame, target: c_uint) -> Option<RawFrame> {
     })
 }
 
+/// Reads one pixel as straight 8-bit RGBA. 16-bit samples are native
+/// endian and reduced to their high byte.
 fn sample_rgba8(fmt: c_uint, p: &[u8]) -> Option<(u8, u8, u8, u8)> {
+    let hi = |i: usize| (u16::from_ne_bytes([p[2 * i], p[2 * i + 1]]) >> 8) as u8;
     Some(match fmt {
+        ngapi::GLYCIN_NG_FORMAT_G16 => (hi(0), hi(0), hi(0), 255),
+        ngapi::GLYCIN_NG_FORMAT_G16A16 => (hi(0), hi(0), hi(0), hi(1)),
+        ngapi::GLYCIN_NG_FORMAT_R16G16B16 => (hi(0), hi(1), hi(2), 255),
+        ngapi::GLYCIN_NG_FORMAT_R16G16B16A16 => (hi(0), hi(1), hi(2), hi(3)),
         ngapi::GLYCIN_NG_FORMAT_G8 => (p[0], p[0], p[0], 255),
         ngapi::GLYCIN_NG_FORMAT_G8A8 => (p[0], p[0], p[0], p[1]),
         ngapi::GLYCIN_NG_FORMAT_G8A8_PRE => {
@@ -288,5 +293,24 @@ mod tests {
         let out = maybe_convert(f, Selection::R8G8B8A8.bits() | Selection::R8G8B8.bits());
         assert_eq!(out.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
         assert_eq!(out.data, &[40, 40, 40, 255]);
+    }
+
+    #[test]
+    fn unknown_selection_bits_are_ignored() {
+        let f = frame(ngapi::GLYCIN_NG_FORMAT_G8, vec![40], 1, 1);
+        let out = maybe_convert(f, Selection::R8G8B8A8.bits() | 1 << 31);
+        assert_eq!(out.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
+    }
+
+    #[test]
+    fn sixteen_bit_reduces_to_high_byte() {
+        let px = [0x1234u16, 0xabcd]
+            .iter()
+            .flat_map(|v| v.to_ne_bytes())
+            .collect();
+        let f = frame(ngapi::GLYCIN_NG_FORMAT_G16A16, px, 1, 1);
+        let out = maybe_convert(f, Selection::R8G8B8A8.bits() | Selection::R8G8B8.bits());
+        assert_eq!(out.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
+        assert_eq!(out.data, &[0x12, 0x12, 0x12, 0xab]);
     }
 }

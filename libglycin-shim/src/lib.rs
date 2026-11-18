@@ -276,14 +276,22 @@ pub unsafe extern "C" fn gly_loader_load(
         unsafe { set_error(error, 0, "null loader") };
         return ptr::null_mut();
     };
-
-    let inner_ptr = match state.inner.lock().unwrap().take() {
-        Some(p) => p,
-        None => {
-            unsafe { set_error(error, 0, "loader already consumed") };
-            return ptr::null_mut();
+    match load_image(state) {
+        Ok(image) => unsafe { attach_state(image) },
+        Err(msg) => {
+            unsafe { set_error(error, 0, &msg) };
+            ptr::null_mut()
         }
-    };
+    }
+}
+
+fn load_image(state: &LoaderState) -> Result<ImageState, String> {
+    let inner_ptr = state
+        .inner
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or("loader already consumed")?;
 
     let apply = *state.apply_transformations.lock().unwrap();
     let limits = *state.limits.lock().unwrap();
@@ -296,8 +304,7 @@ pub unsafe extern "C" fn gly_loader_load(
 
     let image_ptr = unsafe { ngapi::glycin_ng_loader_load(inner_ptr) };
     if image_ptr.is_null() {
-        unsafe { set_error_from_ng(error, "gly_loader_load") };
-        return ptr::null_mut();
+        return Err(format!("gly_loader_load: {}", ngapi::last_error_message()));
     }
 
     let frame_count = unsafe { ngapi::glycin_ng_image_frame_count(image_ptr) };
@@ -321,15 +328,13 @@ pub unsafe extern "C" fn gly_loader_load(
         }
     });
     let mime = mime::from_format_name(&format_name).and_then(|m| CString::new(m).ok());
-    unsafe {
-        attach_state(ImageState::new(
-            image_ptr,
-            frame_count,
-            rerender,
-            accepted,
-            mime,
-        ))
-    }
+    Ok(ImageState::new(
+        image_ptr,
+        frame_count,
+        rerender,
+        accepted,
+        mime,
+    ))
 }
 
 fn is_rescalable_format(name: &str) -> bool {
@@ -511,12 +516,29 @@ fn specific_frame(
         .ok_or((2, "no more frames"))?;
     let raw =
         extract_frame(img_state.inner, idx, accepted).ok_or((0, "frame extraction failed"))?;
+    let icc_profile = fetch_icc(img_state.inner).filter(|icc| icc_matches(icc, raw.format));
     Ok(FrameState {
         frame: raw,
         cicp: fetch_cicp(img_state.inner),
-        icc_profile: fetch_icc(img_state.inner),
+        icc_profile,
         pixel_density: fetch_density(img_state.inner),
     })
+}
+
+/// A grayscale ICC profile cannot describe a gray frame that
+/// conversion expanded to color.
+fn icc_matches(icc: &[u8], format: c_uint) -> bool {
+    let gray_profile = icc.get(16..20) == Some(b"GRAY");
+    let gray_frame = matches!(
+        format,
+        ngapi::GLYCIN_NG_FORMAT_G8
+            | ngapi::GLYCIN_NG_FORMAT_G8A8
+            | ngapi::GLYCIN_NG_FORMAT_G8A8_PRE
+            | ngapi::GLYCIN_NG_FORMAT_G16
+            | ngapi::GLYCIN_NG_FORMAT_G16A16
+            | ngapi::GLYCIN_NG_FORMAT_G16A16_PRE
+    );
+    !gray_profile || gray_frame
 }
 
 /// Read the image's CICP code points from the engine, if present.
@@ -1040,20 +1062,30 @@ mod frame_tests {
     use crate::convert::Selection;
 
     #[test]
-    fn raster_frame_honours_accepted_formats() {
+    fn raster_frame_honours_loader_accepted_formats() {
         let png = include_bytes!("../../tests/data/gray-alpha.png");
-        let loader = unsafe { ngapi::glycin_ng_loader_new_bytes(png.as_ptr(), png.len()) };
-        assert!(!loader.is_null());
-        let image = unsafe { ngapi::glycin_ng_loader_load(loader) };
-        assert!(!image.is_null());
-        let frame_count = unsafe { ngapi::glycin_ng_image_frame_count(image) };
-        let accepted = Selection::R8G8B8A8.bits() | Selection::R8G8B8.bits();
-        let state = ImageState::new(image, frame_count, None, accepted, None);
+        let inner = unsafe { ngapi::glycin_ng_loader_new_bytes(png.as_ptr(), png.len()) };
+        let loader = LoaderState::new(inner, None);
+        *loader.accepted_memory_formats.lock().unwrap() =
+            Selection::R8G8B8A8.bits() | Selection::R8G8B8.bits();
+        let image = load_image(&loader).unwrap();
 
-        let frame = specific_frame(&state, None).unwrap().frame;
+        let frame = specific_frame(&image, None).unwrap().frame;
         assert_eq!(frame.format, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8);
         assert_eq!(frame.stride, 8);
         assert_eq!(frame.data, [40, 40, 40, 200, 90, 90, 90, 0]);
+    }
+
+    #[test]
+    fn gray_icc_is_dropped_once_frame_is_color() {
+        let mut gray = vec![0u8; 128];
+        gray[16..20].copy_from_slice(b"GRAY");
+        assert!(icc_matches(&gray, ngapi::GLYCIN_NG_FORMAT_G8A8));
+        assert!(!icc_matches(&gray, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8));
+
+        let mut rgb = vec![0u8; 128];
+        rgb[16..20].copy_from_slice(b"RGB ");
+        assert!(icc_matches(&rgb, ngapi::GLYCIN_NG_FORMAT_R8G8B8A8));
     }
 }
 
