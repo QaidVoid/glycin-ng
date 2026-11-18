@@ -196,6 +196,10 @@ fn is_supported(target: KnownFormat) -> bool {
 /// `CreatorPixelDensity` for JPEG, PNG, and TIFF). PNG and TIFF
 /// support is only reported when the corresponding codec feature is
 /// enabled, since the fallback encoders cannot write density.
+#[allow(
+    clippy::match_like_matches_macro,
+    reason = "arms are constant only when all codec features are on"
+)]
 fn supports_density(target: KnownFormat) -> bool {
     match target {
         KnownFormat::Jpeg => true,
@@ -695,7 +699,7 @@ mod tests {
             height: 4,
             stride: 16,
             format: MemoryFormat::R8g8b8a8,
-            data: vec![10, 20, 30, 255].repeat(16),
+            data: [10, 20, 30, 255].repeat(16),
         }
     }
 

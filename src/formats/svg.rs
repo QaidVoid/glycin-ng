@@ -5,6 +5,8 @@
 //! persistent SVG document C API (`glycin_ng_svg_*`), which the
 //! librsvg compatibility shim builds on.
 
+#![cfg_attr(not(feature = "c-api"), allow(dead_code))]
+
 mod empty_groups;
 mod xinclude;
 

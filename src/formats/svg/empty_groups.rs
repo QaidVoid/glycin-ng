@@ -114,11 +114,7 @@ fn removable(e: &BytesStart<'_>, document: &[u8]) -> bool {
     for attr in e.attributes().with_checks(false).flatten() {
         match attr.key.as_ref() {
             b"filter" => return false,
-            b"id" => {
-                if is_referenced(&attr.value, document) {
-                    return false;
-                }
-            }
+            b"id" if is_referenced(&attr.value, document) => return false,
             _ => {}
         }
     }
