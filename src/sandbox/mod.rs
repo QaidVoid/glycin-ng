@@ -1,11 +1,11 @@
 //! Sandbox primitives and posture reporting.
 //!
 //! The decoder runs on a dedicated worker thread. The
-//! [`run_in_worker`] entry point spawns that thread, applies every
+//! `run_in_worker` entry point spawns that thread, applies every
 //! requested layer in irreversible-after order
 //! (`rlimit` -> `landlock` -> `seccomp`), runs the supplied closure,
 //! and joins the thread before returning. A worker panic becomes
-//! [`Error::Internal`](crate::Error::Internal).
+//! [`Error::Internal`].
 
 pub(crate) mod landlock;
 pub(crate) mod rlimit;
@@ -117,7 +117,7 @@ pub struct SandboxSelector {
     /// Attempt seccomp.
     pub seccomp: bool,
     /// Apply `RLIMIT_AS` and `RLIMIT_CPU` from
-    /// [`Limits`](crate::Limits). Off by default because both limits
+    /// [`Limits`]. Off by default because both limits
     /// are process-wide and affect the host's main thread.
     pub rlimit: bool,
     /// Refuse the decode if any selected layer fails to apply.
