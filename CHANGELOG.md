@@ -1,4 +1,15 @@
 
+## 0.5.4 — 2026-11-18
+
+### Bug Fixes
+
+- Restore docs.rs build and clean up clippy warnings (#38)
+- **libglycin-shim:** Honour accepted memory formats for raster frames (#35)
+
+### Features
+
+- **libglycin-shim:** Convert float and premultiplied 16-bit frames (#37)
+
 ## 0.5.3 — 2026-10-07
 
 ### Features
