@@ -16,6 +16,7 @@ path = "src/lib.rs"
 path = ".."
 default-features = false
 features = [
+  "avif",
   "bmp",
   "c-api",
   "dds",

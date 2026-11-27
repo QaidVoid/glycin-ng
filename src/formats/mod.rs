@@ -14,6 +14,8 @@
 ))]
 mod image_rs;
 
+#[cfg(feature = "avif")]
+mod avif;
 #[cfg(feature = "bmp")]
 mod bmp;
 #[cfg(feature = "dds")]
@@ -98,6 +100,8 @@ pub(crate) fn dispatch(format: KnownFormat, bytes: &[u8], opts: &DecodeOptions) 
         KnownFormat::Jxl => jxl::decode(bytes, opts),
         #[cfg(feature = "svg")]
         KnownFormat::Svg => svg::decode(bytes, opts),
+        #[cfg(feature = "avif")]
+        KnownFormat::Avif => avif::decode(bytes, opts),
         #[allow(unreachable_patterns)]
         _ => {
             let _ = (bytes, opts);

@@ -22,7 +22,7 @@
 //!
 //! Per-format gates (default on): `png`, `jpeg`, `gif`, `webp`,
 //! `tiff`, `bmp`, `ico`, `tga`, `qoi`, `exr`, `pnm`, `dds`, `jxl`,
-//! `svg`.
+//! `svg`, `avif`.
 //!
 //! C ABI surface (off by default): `c-api`. Enables the `cdylib`
 //! and the C bindings.

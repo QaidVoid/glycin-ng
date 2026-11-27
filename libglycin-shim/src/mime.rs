@@ -24,6 +24,7 @@ pub(crate) fn from_format_name(name: &str) -> Option<&'static str> {
         "dds" => "image/vnd.ms-dds",
         "jxl" => "image/jxl",
         "svg" => "image/svg+xml",
+        "avif" => "image/avif",
         _ => return None,
     })
 }
@@ -63,6 +64,7 @@ pub(crate) const SUPPORTED_MIME_TYPES: &[&str] = &[
     "image/x-dds",
     "image/jxl",
     "image/svg+xml",
+    "image/avif",
 ];
 
 #[cfg(test)]
@@ -82,7 +84,7 @@ mod tests {
     fn every_format_name_mime_is_in_supported_list() {
         for name in [
             "png", "jpeg", "gif", "webp", "tiff", "bmp", "ico", "tga", "qoi", "exr", "pnm", "dds",
-            "jxl", "svg",
+            "jxl", "svg", "avif",
         ] {
             let mime = from_format_name(name).expect("mapped");
             assert!(

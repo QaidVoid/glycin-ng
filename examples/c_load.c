@@ -1,6 +1,6 @@
 /* Sample C program: decode an image and print its dimensions.
  *
- * Build: cargo build --release --features c-api
+ * Build: cargo build --release -p glycin-ng-c
  *        cc -I include examples/c_load.c -Ltarget/release -lglycin_ng -o c_load
  *
  * Run:   LD_LIBRARY_PATH=target/release ./c_load path/to/image.png
