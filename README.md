@@ -134,7 +134,8 @@ icons.
 
 HEIF and camera RAW are not supported because there is no
 permissively licensed Rust decoder for them yet. AVIF image grids and
-animations are not decoded; an animated AVIF shows its first frame.
+animation tracks are not decoded. For an animated AVIF, only the
+primary still image is shown.
 
 `glycin-ng-rav1d` is a fork of [rav1d](https://github.com/memorysafety/rav1d)
 that tracks upstream `main` and keeps the AV1 decoder's C symbols out

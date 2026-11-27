@@ -36,8 +36,51 @@ pub(super) struct Props {
     pub colr: Colr,
     /// Counter-clockwise rotation in 90 degree steps (`irot`).
     pub rotation: u8,
-    /// Mirror axis (`imir`): 0 flips left/right, 1 flips top/bottom.
+    /// Mirror axis (`imir`): 0 swaps top/bottom, 1 swaps left/right.
     pub mirror: Option<u8>,
+    /// Clean aperture (`clap`).
+    pub clap: Option<Clap>,
+    /// AV1 operating point to decode (`a1op`).
+    pub operating_point: u8,
+}
+
+/// Clean aperture from a `clap` box, as numerator and denominator
+/// pairs. Offsets are measured from the image centre.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(super) struct Clap {
+    pub width: (u32, u32),
+    pub height: (u32, u32),
+    pub horiz_off: (i32, u32),
+    pub vert_off: (i32, u32),
+}
+
+impl Clap {
+    /// Crop rectangle `(x, y, width, height)` inside a `width` by
+    /// `height` image, or `None` if the aperture is not a whole-pixel
+    /// rectangle within it.
+    pub fn rect(&self, width: u32, height: u32) -> Option<(u32, u32, u32, u32)> {
+        let (x, w) = aperture_axis(self.width, self.horiz_off, width)?;
+        let (y, h) = aperture_axis(self.height, self.vert_off, height)?;
+        Some((x, y, w, h))
+    }
+}
+
+/// Origin and size of the aperture along one axis of length `full`.
+fn aperture_axis((n, d): (u32, u32), (off_n, off_d): (i32, u32), full: u32) -> Option<(u32, u32)> {
+    if d == 0 || off_d == 0 || n % d != 0 {
+        return None;
+    }
+    let size = n / d;
+    if size == 0 || size > full {
+        return None;
+    }
+    let num = 2 * off_n as i128 + (full - size) as i128 * off_d as i128;
+    let den = 2 * off_d as i128;
+    if num % den != 0 {
+        return None;
+    }
+    let origin = u32::try_from(num / den).ok()?;
+    (origin.checked_add(size)? <= full).then_some((origin, size))
 }
 
 /// AV1 item resolved from the container.
@@ -73,6 +116,8 @@ enum Property {
     Irot(u8),
     Imir(u8),
     AuxC(bool),
+    Clap(Clap),
+    A1op(u8),
     Other,
 }
 
@@ -166,6 +211,8 @@ impl<'a> Meta<'a> {
                 }
                 Property::Irot(r) => props.rotation = *r,
                 Property::Imir(m) => props.mirror = Some(*m),
+                Property::Clap(c) => props.clap = Some(*c),
+                Property::A1op(op) => props.operating_point = *op,
                 Property::AuxC(_) | Property::Other => {}
             }
         }
@@ -206,6 +253,12 @@ impl<'a> Meta<'a> {
                     .ok_or_else(|| malformed("extent out of range"))
             })
             .collect::<Result<Vec<_>>>()?;
+        let total = data
+            .iter()
+            .try_fold(0usize, |sum, d| sum.checked_add(d.len()));
+        if total.is_none_or(|t| t > source.len()) {
+            return Err(malformed("item extents exceed their source"));
+        }
         Ok(Item { data, props })
     }
 }
@@ -277,6 +330,9 @@ fn parse_iloc(body: &[u8], meta: &mut Meta) -> Result<()> {
         let _data_reference_index = read_u16(&mut r)?;
         let base_offset = read_sized(&mut r, base_offset_size)?;
         let extent_count = read_u16(&mut r)?;
+        if index_size + offset_size + length_size == 0 && extent_count > 1 {
+            return Err(malformed("iloc extents have no fields"));
+        }
         let mut extents = Vec::with_capacity(extent_count.min(64) as usize);
         for _ in 0..extent_count {
             read_sized(&mut r, index_size)?;
@@ -332,6 +388,17 @@ fn parse_ipco(mut body: &[u8], meta: &mut Meta) -> Result<()> {
             b"colr" => Property::Colr(parse_colr(b)?),
             b"irot" => Property::Irot(b.first().copied().unwrap_or(0) & 3),
             b"imir" => Property::Imir(b.first().copied().unwrap_or(0) & 1),
+            b"a1op" => Property::A1op(take(&mut { b }, 1)?[0]),
+            b"clap" => {
+                let mut r = b;
+                let mut next = || read_u32(&mut r);
+                Property::Clap(Clap {
+                    width: (next()?, next()?),
+                    height: (next()?, next()?),
+                    horiz_off: (next()? as i32, next()?),
+                    vert_off: (next()? as i32, next()?),
+                })
+            }
             b"auxC" => {
                 let (_, r) = full_box(b)?;
                 let urn = r.split(|&c| c == 0).next().unwrap_or(r);
@@ -477,5 +544,26 @@ mod tests {
     #[test]
     fn rejects_truncated_box() {
         assert!(next_box(b"\0\0\0\x20ftyp").is_err());
+    }
+
+    #[test]
+    fn clap_resolves_centred_and_offset_apertures() {
+        let clap = |w, h, x: i32, y: i32| Clap {
+            width: (w, 1),
+            height: (h, 1),
+            horiz_off: (x, 1),
+            vert_off: (y, 1),
+        };
+        assert_eq!(
+            clap(600, 440, 0, 0).rect(640, 480),
+            Some((20, 20, 600, 440))
+        );
+        assert_eq!(
+            clap(600, 440, -20, 20).rect(640, 480),
+            Some((0, 40, 600, 440))
+        );
+        assert_eq!(clap(600, 440, -21, 0).rect(640, 480), None);
+        assert_eq!(clap(641, 480, 0, 0).rect(640, 480), None);
+        assert_eq!(clap(5, 5, 0, 0).rect(6, 6), None);
     }
 }

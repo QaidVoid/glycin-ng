@@ -98,7 +98,7 @@ unused once the shim is in place and can be removed.
 | `gly_image_get_mime_type`                                             | detected IANA media type of the decoded image                     |
 | `gly_frame_request_new` / `_set_loop_animation` / `_set_scale`         | stored; scaling is not yet applied                                |
 | `gly_frame_get_width` / `_height` / `_stride` / `_memory_format` / `_buf_bytes` / `_delay` |                                                       |
-| `gly_frame_get_color_cicp`                                            | CICP code points when present (PNG `cICP` chunk), else `NULL`      |
+| `gly_frame_get_color_cicp`                                            | CICP code points when present (PNG `cICP`, AVIF `nclx`), else `NULL` |
 | `gly_memory_format_has_alpha` / `_is_premultiplied`                    |                                                                   |
 | `gly_loader_get_mime_types`                                          | full set of decodable IANA media types as a `GStrv`               |
 | `gly_loader_error_quark`                                               |                                                                   |
@@ -153,9 +153,12 @@ yield an empty list.
 ### Color (CICP)
 
 `gly_frame_get_color_cicp` returns the frame's coding-independent code
-points (`GlyCicp`) when the source carries them (PNG `cICP` chunk), or
-`NULL` otherwise. The four code-point bytes come from the PNG decoder
-and are surfaced through the engine's C ABI. Decoding stays on
+points (`GlyCicp`), or `NULL` when there are none. For PNG they are
+the `cICP` chunk as stored in the file. For AVIF without an ICC
+profile they are the colour primaries and transfer characteristics
+from the `nclx` box or the AV1 sequence header. Because the AVIF
+decoder already converts YUV to RGB, the matrix is reported as
+identity (0) and the range as full. Decoding stays on
 permissive (MIT/Apache) dependencies; no copyleft metadata library is
 pulled in.
 

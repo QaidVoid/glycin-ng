@@ -78,11 +78,14 @@ impl Picture {
 /// Decode one AV1 still frame assembled from `extents`.
 ///
 /// `max_pixels` is forwarded to rav1d's frame size limit so oversized
-/// frames are rejected before any plane is allocated.
-pub(super) fn decode(extents: &[&[u8]], max_pixels: u64) -> Result<Picture> {
+/// frames are rejected before any plane is allocated. Only the highest
+/// spatial layer of `operating_point` is returned.
+pub(super) fn decode(extents: &[&[u8]], max_pixels: u64, operating_point: u8) -> Result<Picture> {
     let mut settings = Settings::new();
     settings.set_n_threads(1);
     settings.set_max_frame_delay(1);
+    settings.set_operating_point(operating_point);
+    settings.set_all_layers(false);
     settings.set_frame_size_limit(max_pixels.min(u32::MAX as u64) as u32);
     settings.set_logging(false);
     let mut decoder = Decoder::with_settings(&settings).map_err(map_err)?;

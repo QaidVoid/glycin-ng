@@ -168,8 +168,14 @@ pub(crate) fn is_avif(buf: &[u8]) -> bool {
     if buf.len() < 16 || &buf[4..8] != b"ftyp" {
         return false;
     }
-    let size = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
-    let ftyp = &buf[8..size.clamp(8, buf.len())];
+    let (header, size) = match u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) {
+        1 => {
+            let large = u64::from_be_bytes(buf[8..16].try_into().unwrap_or_default());
+            (16, usize::try_from(large).unwrap_or(usize::MAX))
+        }
+        size => (8, size as usize),
+    };
+    let ftyp = &buf[header..size.clamp(header, buf.len())];
     let is_brand = |b: &[u8]| b == b"avif" || b == b"avis";
     ftyp.get(..4).is_some_and(is_brand)
         || ftyp
@@ -331,6 +337,8 @@ mod tests {
         assert_eq!(detect(compat), Some(KnownFormat::Avif));
         let heic = b"\0\0\0\x18ftypheic\0\0\0\0mif1heic";
         assert_eq!(detect(heic), None);
+        let large = b"\0\0\0\x01ftyp\0\0\0\0\0\0\0\x20mif1\0\0\0\0mif1avif";
+        assert_eq!(detect(large), Some(KnownFormat::Avif));
     }
 
     #[test]

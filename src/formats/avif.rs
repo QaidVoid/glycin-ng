@@ -17,13 +17,13 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     opts.limits.check_dimensions(props.width, props.height, 1)?;
 
     let max_pixels = opts.limits.max_pixels;
-    let color = av1::decode(&avif.color.data, max_pixels)?;
+    let color = av1::decode(&avif.color.data, max_pixels, props.operating_point)?;
     let (width, height) = (color.width(), color.height());
     opts.limits.check_dimensions(width, height, 1)?;
 
     let alpha = match &avif.alpha {
         Some(item) => {
-            let alpha = av1::decode(&item.data, max_pixels)?;
+            let alpha = av1::decode(&item.data, max_pixels, item.props.operating_point)?;
             if (alpha.width(), alpha.height(), alpha.bit_depth())
                 != (width, height, color.bit_depth())
             {
@@ -38,9 +38,9 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     let nclx = props.colr.nclx;
     let matrix = yuv::Matrix {
         coefficients: nclx.map_or(seq.matrix, |n| n.matrix),
-        full_range: seq.full_range,
+        full_range: nclx.map_or(seq.full_range, |n| n.full_range),
     };
-    let (pixels, wide) = yuv::to_rgb(&color, alpha.as_ref(), matrix);
+    let (mut pixels, wide) = yuv::to_rgb(&color, alpha.as_ref(), matrix)?;
 
     let format = match (wide, alpha.is_some(), avif.premultiplied) {
         (false, false, _) => MemoryFormat::R8g8b8,
@@ -50,7 +50,15 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
         (true, true, false) => MemoryFormat::R16g16b16a16,
         (true, true, true) => MemoryFormat::R16g16b16a16Premultiplied,
     };
-    let stride = width * format.bytes_per_pixel() as u32;
+    let bpp = format.bytes_per_pixel() as usize;
+    let (width, height) = match props.clap.and_then(|c| c.rect(width, height)) {
+        Some((x, y, w, h)) => {
+            pixels = crop(&pixels, width as usize * bpp, bpp, (x, y, w, h));
+            (w, h)
+        }
+        None => (width, height),
+    };
+    let stride = width * bpp as u32;
     let texture = Texture::from_parts(width, height, stride, format, pixels.into_boxed_slice())
         .ok_or_else(|| Error::Decoder {
             format: "avif",
@@ -76,6 +84,20 @@ pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Image> {
     }
     image.set_orientation(orientation);
     Ok(image)
+}
+
+/// Copy the `(x, y, width, height)` rectangle out of packed pixels.
+fn crop(pixels: &[u8], stride: usize, bpp: usize, (x, y, w, h): (u32, u32, u32, u32)) -> Vec<u8> {
+    let row = w as usize * bpp;
+    let mut out = Vec::with_capacity(row * h as usize);
+    for line in pixels
+        .chunks_exact(stride)
+        .skip(y as usize)
+        .take(h as usize)
+    {
+        out.extend_from_slice(&line[x as usize * bpp..][..row]);
+    }
+    out
 }
 
 /// Combine HEIF `irot` (counter-clockwise quarter turns) followed by
@@ -156,6 +178,14 @@ mod tests {
     fn lossless_round_trips_exactly() {
         let image = decode(include_bytes!("../../tests/data/lossless.avif"), &opts()).unwrap();
         assert_eq!(pixel(&image, 3, 5), [200, 100, 50]);
+    }
+
+    #[test]
+    fn clean_aperture_crops_the_frame() {
+        let image = decode(include_bytes!("../../tests/data/clap.avif"), &opts()).unwrap();
+        assert_eq!((image.width(), image.height()), (40, 30));
+        assert_eq!(pixel(&image, 0, 0), [40, 30, 0]);
+        assert_eq!(pixel(&image, 39, 29), [196, 175, 0]);
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! for 8-bit sources and 16-bit RGB(A) above that.
 
 use super::av1::{Layout, Picture};
+use crate::{Error, Result};
 
 /// How to interpret the luma and chroma samples.
 #[derive(Copy, Clone, Debug)]
@@ -26,28 +27,32 @@ enum Kind {
 }
 
 impl Kind {
-    fn new(coefficients: u8, layout: Layout) -> Self {
+    /// Returns `None` for matrices without a linear Kr/Kb conversion:
+    /// BT.2020 constant luminance, SMPTE ST 2085, chroma-derived and
+    /// ICtCp.
+    fn new(coefficients: u8, layout: Layout) -> Option<Self> {
         if layout == Layout::I400 {
-            return Self::Mono;
+            return Some(Self::Mono);
         }
         let (kr, kb) = match coefficients {
-            0 if layout == Layout::I444 => return Self::Identity,
-            8 => return Self::YCgCo,
+            0 if layout == Layout::I444 => return Some(Self::Identity),
+            8 => return Some(Self::YCgCo),
             1 => (0.2126, 0.0722),
             4 => (0.30, 0.11),
             7 => (0.212, 0.087),
-            9 | 10 => (0.2627, 0.0593),
+            9 => (0.2627, 0.0593),
+            10..=14 => return None,
             _ => (0.299, 0.114),
         };
         let kg = 1.0 - kr - kb;
         let cr_r = 2.0 * (1.0 - kr);
         let cb_b = 2.0 * (1.0 - kb);
-        Self::Ycbcr {
+        Some(Self::Ycbcr {
             cr_r,
             cb_g: kb * cb_b / kg,
             cr_g: kr * cr_r / kg,
             cb_b,
-        }
+        })
     }
 }
 
@@ -122,19 +127,31 @@ impl Sample for u16 {
 ///
 /// `alpha` must match `color` in size and bit depth. Returns the pixel
 /// bytes and whether samples are 16 bits wide.
-pub(super) fn to_rgb(color: &Picture, alpha: Option<&Picture>, matrix: Matrix) -> (Vec<u8>, bool) {
-    if color.bit_depth() > 8 {
-        (convert::<u16>(color, alpha, matrix), true)
+pub(super) fn to_rgb(
+    color: &Picture,
+    alpha: Option<&Picture>,
+    matrix: Matrix,
+) -> Result<(Vec<u8>, bool)> {
+    let kind = Kind::new(matrix.coefficients, color.layout()).ok_or_else(|| Error::Decoder {
+        format: "avif",
+        message: format!("unsupported matrix coefficients {}", matrix.coefficients),
+    })?;
+    Ok(if color.bit_depth() > 8 {
+        (convert::<u16>(color, alpha, matrix, kind), true)
     } else {
-        (convert::<u8>(color, alpha, matrix), false)
-    }
+        (convert::<u8>(color, alpha, matrix, kind), false)
+    })
 }
 
-fn convert<S: Sample>(color: &Picture, alpha: Option<&Picture>, matrix: Matrix) -> Vec<u8> {
+fn convert<S: Sample>(
+    color: &Picture,
+    alpha: Option<&Picture>,
+    matrix: Matrix,
+    kind: Kind,
+) -> Vec<u8> {
     let width = color.width() as usize;
     let depth = color.bit_depth();
     let layout = color.layout();
-    let kind = Kind::new(matrix.coefficients, layout);
     let channels = if alpha.is_some() { 4 } else { 3 };
     let pixel_bytes = channels * S::BYTES;
     let row_bytes = width * S::BYTES;
