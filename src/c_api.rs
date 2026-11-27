@@ -883,6 +883,8 @@ pub const GLYCIN_NG_KFMT_DDS: c_uint = 12;
 pub const GLYCIN_NG_KFMT_JXL: c_uint = 13;
 /// Known-format constant: SVG.
 pub const GLYCIN_NG_KFMT_SVG: c_uint = 14;
+/// Known-format constant: AVIF.
+pub const GLYCIN_NG_KFMT_AVIF: c_uint = 15;
 
 fn c_uint_to_format(value: c_uint) -> Option<KnownFormat> {
     Some(match value {
@@ -900,6 +902,7 @@ fn c_uint_to_format(value: c_uint) -> Option<KnownFormat> {
         GLYCIN_NG_KFMT_DDS => KnownFormat::Dds,
         GLYCIN_NG_KFMT_JXL => KnownFormat::Jxl,
         GLYCIN_NG_KFMT_SVG => KnownFormat::Svg,
+        GLYCIN_NG_KFMT_AVIF => KnownFormat::Avif,
         _ => return None,
     })
 }
@@ -920,6 +923,7 @@ fn format_to_c_uint(f: KnownFormat) -> c_uint {
         KnownFormat::Dds => GLYCIN_NG_KFMT_DDS,
         KnownFormat::Jxl => GLYCIN_NG_KFMT_JXL,
         KnownFormat::Svg => GLYCIN_NG_KFMT_SVG,
+        KnownFormat::Avif => GLYCIN_NG_KFMT_AVIF,
     }
 }
 

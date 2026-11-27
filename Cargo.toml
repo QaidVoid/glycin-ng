@@ -35,6 +35,7 @@ name = "sandbox_overhead"
 [dependencies]
 base64 = { version = "0.22.1", optional = true }
 fontdb = { version = "0.24", default-features = false, features = ["fs", "memmap"], optional = true }
+glycin-ng-rav1d = { version = "1.1.1", default-features = false, features = ["bitdepth_8", "bitdepth_16"], optional = true }
 quick-xml = { version = "0.41.0", optional = true }
 thiserror = "2"
 
@@ -91,6 +92,7 @@ libc = "0.2"
 
 [features]
 default = [
+  "avif",
   "bmp",
   "dds",
   "decode",
@@ -128,6 +130,7 @@ seccomp = []
 
 c-api = []
 
+avif = ["dep:glycin-ng-rav1d"]
 bmp = ["dep:image"]
 dds = ["dep:image"]
 exr = ["dep:image", "image/exr"]

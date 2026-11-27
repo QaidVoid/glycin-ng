@@ -9,6 +9,7 @@ allow = [
   "Apache-2.0",
   "BSD-2-Clause",
   "BSD-3-Clause",
+  "CC0-1.0",
   "Zlib",
   "Unicode-3.0",
   "Unlicense",
@@ -22,7 +23,10 @@ deny = []
 
 [advisories]
 yanked = "deny"
-ignore = []
+ignore = [
+  # Compile-time macro used by glycin-ng-rav1d; unmaintained, not vulnerable.
+  { id = "RUSTSEC-2024-0436", reason = "build-time only proc macro pulled in by rav1d" },
+]
 
 [sources]
 unknown-registry = "deny"

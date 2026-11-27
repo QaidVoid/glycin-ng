@@ -103,6 +103,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "avif_decode"
+path = "fuzz_targets/avif_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "jxl_decode"
 path = "fuzz_targets/jxl_decode.rs"
 test = false

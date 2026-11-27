@@ -36,6 +36,8 @@ pub enum KnownFormat {
     Jxl,
     /// Scalable Vector Graphics.
     Svg,
+    /// AV1 Image File Format.
+    Avif,
 }
 
 impl KnownFormat {
@@ -56,6 +58,7 @@ impl KnownFormat {
             Self::Dds => "dds",
             Self::Jxl => "jxl",
             Self::Svg => "svg",
+            Self::Avif => "avif",
         }
     }
 
@@ -76,6 +79,7 @@ impl KnownFormat {
             "dds" => Some(Self::Dds),
             "jxl" => Some(Self::Jxl),
             "svg" | "svgz" => Some(Self::Svg),
+            "avif" => Some(Self::Avif),
             _ => None,
         }
     }
@@ -101,6 +105,7 @@ impl KnownFormat {
             "image/vnd.ms-dds" | "image/vnd-ms.dds" | "image/x-dds" => Some(Self::Dds),
             "image/jxl" => Some(Self::Jxl),
             "image/svg+xml" => Some(Self::Svg),
+            "image/avif" => Some(Self::Avif),
             _ => None,
         }
     }
@@ -148,10 +153,28 @@ pub fn detect(buf: &[u8]) -> Option<KnownFormat> {
     if starts_with(buf, b"\xff\x0a") || starts_with(buf, b"\0\0\0\x0cJXL \r\n\x87\n") {
         return Some(KnownFormat::Jxl);
     }
+    if is_avif(buf) {
+        return Some(KnownFormat::Avif);
+    }
     if looks_like_svg(buf) {
         return Some(KnownFormat::Svg);
     }
     None
+}
+
+/// ISOBMFF `ftyp` box whose major or compatible brands include
+/// `avif` or `avis`.
+pub(crate) fn is_avif(buf: &[u8]) -> bool {
+    if buf.len() < 16 || &buf[4..8] != b"ftyp" {
+        return false;
+    }
+    let size = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    let ftyp = &buf[8..size.clamp(8, buf.len())];
+    let is_brand = |b: &[u8]| b == b"avif" || b == b"avis";
+    ftyp.get(..4).is_some_and(is_brand)
+        || ftyp
+            .get(8..)
+            .is_some_and(|c| c.as_chunks::<4>().0.iter().any(|b| is_brand(b)))
 }
 
 fn looks_like_svg(buf: &[u8]) -> bool {
@@ -301,6 +324,16 @@ mod tests {
     }
 
     #[test]
+    fn detects_avif() {
+        let still = b"\0\0\0\x1cftypavif\0\0\0\0avifmif1miaf";
+        assert_eq!(detect(still), Some(KnownFormat::Avif));
+        let compat = b"\0\0\0\x18ftypmif1\0\0\0\0mif1avis";
+        assert_eq!(detect(compat), Some(KnownFormat::Avif));
+        let heic = b"\0\0\0\x18ftypheic\0\0\0\0mif1heic";
+        assert_eq!(detect(heic), None);
+    }
+
+    #[test]
     fn detects_svg() {
         assert_eq!(detect(b"<svg/>"), Some(KnownFormat::Svg));
         assert_eq!(detect(b"<svg "), Some(KnownFormat::Svg));
@@ -359,6 +392,7 @@ mod tests {
             KnownFormat::Pnm,
             KnownFormat::Dds,
             KnownFormat::Jxl,
+            KnownFormat::Avif,
         ] {
             let n = f.name();
             assert!(!n.is_empty());

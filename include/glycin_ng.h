@@ -82,6 +82,7 @@ typedef struct GlycinNgEncodedImage GlycinNgEncodedImage;
 #define GLYCIN_NG_KFMT_DDS 12u
 #define GLYCIN_NG_KFMT_JXL 13u
 #define GLYCIN_NG_KFMT_SVG 14u
+#define GLYCIN_NG_KFMT_AVIF 15u
 
 /* Error helpers. */
 const char* glycin_ng_last_error(void);
