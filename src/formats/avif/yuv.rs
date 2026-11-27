@@ -27,16 +27,17 @@ enum Kind {
 }
 
 impl Kind {
-    /// Returns `None` for matrices without a linear Kr/Kb conversion:
-    /// BT.2020 constant luminance, SMPTE ST 2085, chroma-derived and
-    /// ICtCp.
-    fn new(coefficients: u8, layout: Layout) -> Option<Self> {
+    /// Returns `None` for matrices without a linear Kr/Kb conversion
+    /// (BT.2020 constant luminance, SMPTE ST 2085, chroma-derived and
+    /// ICtCp) and for limited-range YCgCo.
+    fn new(coefficients: u8, full_range: bool, layout: Layout) -> Option<Self> {
         if layout == Layout::I400 {
             return Some(Self::Mono);
         }
         let (kr, kb) = match coefficients {
             0 if layout == Layout::I444 => return Some(Self::Identity),
-            8 => return Some(Self::YCgCo),
+            8 if full_range => return Some(Self::YCgCo),
+            8 => return None,
             1 => (0.2126, 0.0722),
             4 => (0.30, 0.11),
             7 => (0.212, 0.087),
@@ -132,10 +133,17 @@ pub(super) fn to_rgb(
     alpha: Option<&Picture>,
     matrix: Matrix,
 ) -> Result<(Vec<u8>, bool)> {
-    let kind = Kind::new(matrix.coefficients, color.layout()).ok_or_else(|| Error::Decoder {
-        format: "avif",
-        message: format!("unsupported matrix coefficients {}", matrix.coefficients),
-    })?;
+    let kind =
+        Kind::new(matrix.coefficients, matrix.full_range, color.layout()).ok_or_else(|| {
+            let range = if matrix.full_range { "full" } else { "limited" };
+            Error::Decoder {
+                format: "avif",
+                message: format!(
+                    "unsupported matrix coefficients {} with {range} range",
+                    matrix.coefficients
+                ),
+            }
+        })?;
     Ok(if color.bit_depth() > 8 {
         (convert::<u16>(color, alpha, matrix, kind), true)
     } else {

@@ -118,6 +118,7 @@ enum Property {
     AuxC(bool),
     Clap(Clap),
     A1op(u8),
+    Lsel(u16),
     Other,
 }
 
@@ -186,16 +187,18 @@ pub(super) fn parse(file: &[u8]) -> Result<Avif<'_>> {
 
 impl<'a> Meta<'a> {
     fn item_type(&self, id: u32) -> Option<[u8; 4]> {
+        let at = self.item_types.partition_point(|(i, _)| *i < id);
         self.item_types
-            .iter()
-            .find(|(i, _)| *i == id)
+            .get(at)
+            .filter(|(i, _)| *i == id)
             .map(|(_, t)| *t)
     }
 
     fn props(&self, id: u32) -> impl Iterator<Item = &Property> {
-        self.associations
+        let at = self.associations.partition_point(|(i, _)| *i < id);
+        self.associations[at..]
             .iter()
-            .filter(move |(i, _)| *i == id)
+            .take_while(move |(i, _)| *i == id)
             .flat_map(|(_, idx)| idx.iter())
             .filter_map(|&i| self.properties.get((i as usize).checked_sub(1)?))
     }
@@ -213,6 +216,13 @@ impl<'a> Meta<'a> {
                 Property::Imir(m) => props.mirror = Some(*m),
                 Property::Clap(c) => props.clap = Some(*c),
                 Property::A1op(op) => props.operating_point = *op,
+                Property::Lsel(layer) if *layer != 0xffff => {
+                    return Err(Error::Decoder {
+                        format: "avif",
+                        message: "layer selection is not supported".into(),
+                    });
+                }
+                Property::Lsel(_) => {}
                 Property::AuxC(_) | Property::Other => {}
             }
         }
@@ -280,6 +290,8 @@ fn parse_meta(mut buf: &[u8]) -> Result<Meta<'_>> {
         }
         buf = rest;
     }
+    meta.item_types.sort_by_key(|(id, _)| *id);
+    meta.associations.sort_by_key(|(id, _)| *id);
     Ok(meta)
 }
 
@@ -389,6 +401,7 @@ fn parse_ipco(mut body: &[u8], meta: &mut Meta) -> Result<()> {
             b"irot" => Property::Irot(b.first().copied().unwrap_or(0) & 3),
             b"imir" => Property::Imir(b.first().copied().unwrap_or(0) & 1),
             b"a1op" => Property::A1op(take(&mut { b }, 1)?[0]),
+            b"lsel" => Property::Lsel(read_u16(&mut { b })?),
             b"clap" => {
                 let mut r = b;
                 let mut next = || read_u32(&mut r);
