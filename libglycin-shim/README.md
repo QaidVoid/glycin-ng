@@ -3,7 +3,7 @@
 ABI-compatible `libglycin-2.so.0` that forwards every `gly_*` call to
 [`glycin-ng`](../). Drop-in replacement for upstream `libglycin`.
 
-- **~9x smaller install.** ~4 MiB vs ~37 MiB on Arch.
+- **~6x smaller install.** ~6 MiB vs ~37 MiB on Arch.
 - **No bubblewrap. No D-Bus. No helper binaries.**
 - **Permissive licensing only.** No LGPL or MPL transitive code.
 
@@ -33,12 +33,12 @@ on Arch x86_64 against locally-built release artifacts:
 
 | Component               | Upstream libglycin                                                                   | This shim                |
 |-------------------------|--------------------------------------------------------------------------------------|--------------------------|
-| `libglycin-2.so.0`      | ~3.2 MiB                                                                             | ~290 KiB (thin forwarder)|
-| Decode engine           | (in separate loader binaries)                                                        | `libglycin_ng.so` ~3.7 MiB |
+| `libglycin-2.so.0`      | ~3.2 MiB                                                                             | ~315 KiB (thin forwarder)|
+| Decode engine           | (in separate loader binaries)                                                        | `libglycin_ng.so` ~5.8 MiB |
 | Sandbox helper          | `bwrap` (~97 KiB)                                                                    | (in-process)             |
 | Per-format loaders      | `glycin-image-rs`, `glycin-svg`, `glycin-jxl`, `glycin-heif` (shipped via `glycin-loaders`) | (in-process)       |
 | Transitive libraries    | `librsvg` ~10.3 MiB, `libjxl` ~9.7 MiB, `libheif`, `libopenraw`, `libdav1d`, ...     | none added               |
-| **Install weight**      | **~37 MiB** (measured: `glycin` + `librsvg` + `libjxl` + `bubblewrap`)               | **~4 MiB**               |
+| **Install weight**      | **~37 MiB** (measured: `glycin` + `librsvg` + `libjxl` + `bubblewrap`)               | **~6 MiB**               |
 
 ## Build
 
@@ -48,8 +48,8 @@ cargo build --release -p glycin-ng-libglycin-shim
 ```
 
 The first command produces `target/release/libglycin_ng.so` (the
-decode engine, ~3.7 MiB). The second produces
-`target/release/libglycin_2.so` (~290 KiB), which `build.rs` pins to
+decode engine, ~5.8 MiB). The second produces
+`target/release/libglycin_2.so` (~315 KiB), which `build.rs` pins to
 `SONAME libglycin-2.so.0` and links dynamically against
 `libglycin_ng.so`. The shim resolves any caller's
 `NEEDED libglycin-2.so.0` cleanly.
